@@ -66,7 +66,16 @@ do
 
   vHostTemplate=""
   if [ "${domainTarget:0:1}" = "/" ]; then
-    vHostTemplate=$(cat /customization/vhost_static.tpl)  # begins with '/' -> path -> serve static files
+    # Check for static site type
+    staticSiteTypeVar="STATICSITETYPE_$i"
+    staticSiteType=$(eval "echo \${$staticSiteTypeVar}")
+    if [[ "$staticSiteType" == "Gatsby" ]]; then
+      vHostTemplate=$(cat /customization/vhost_static_gatsby.tpl)
+    elif [[ "$staticSiteType" == "NextJS" ]]; then
+      vHostTemplate=$(cat /customization/vhost_static_nextjs.tpl)
+    else
+      vHostTemplate=$(cat /customization/vhost_static.tpl)
+    fi
   elif [ "${domainTarget:0:1}" = ">" ]; then
     vHostTemplate=$(cat /customization/vhost_redirect.tpl)  # begins with '>' -> temporary redirect (HTTP 302)
     domainTarget="${domainTarget:1}"                                    # remove '>' character

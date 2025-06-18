@@ -8,6 +8,8 @@ COPY gzip.conf options-ssl-nginx.conf hsts.conf /etc/nginx/includes/
 COPY site.conf.tpl /customization/
 COPY vhost_service.tpl /customization/
 COPY vhost_static.tpl /customization/
+COPY vhost_static_gatsby.tpl /customization/
+COPY vhost_static_nextjs.tpl /customization/
 COPY vhost_redirect.tpl /customization/
 COPY vhost_location.tpl /customization/
 COPY vhost_location_static.tpl /customization/
