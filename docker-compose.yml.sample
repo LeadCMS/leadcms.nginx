@@ -16,18 +16,18 @@ services:
       - "443:443"
     restart: unless-stopped
 
-  proxy_certbot:
+  certbot:
     build: ./certbot
-    image: proxy_certbot
+    image: certbot
     env_file:
       - ./config.env
     volumes:
       - letsencrypt_certs:/etc/letsencrypt
       - certbot_acme_challenge:/var/www/certbot
 
-  proxy_cron:
+  cron:
     build: ./cron
-    image: proxy_cron
+    image: cron
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./:/workdir:ro
