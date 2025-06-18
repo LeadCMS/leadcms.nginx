@@ -1,5 +1,4 @@
 location  /${location} {
-    rewrite /${location}/(.*) /$1  break;
     proxy_pass         ${locationTarget};
     proxy_redirect     off;
     proxy_set_header   Host $host;
