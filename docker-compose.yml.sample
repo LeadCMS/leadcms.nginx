@@ -2,6 +2,7 @@ version: "3.7"
 
 services:
   nginx:
+    container_name: nginx
     build: ./nginx
     image: nginx
     env_file:
@@ -10,13 +11,13 @@ services:
       - static_sites:/var/www/html
       - letsencrypt_certs:/etc/letsencrypt
       - certbot_acme_challenge:/var/www/certbot
-      - nginx_conf:/etc/nginx/
     ports:
       - "80:80"
       - "443:443"
     restart: unless-stopped
 
   certbot:
+    container_name: certbot
     build: ./certbot
     image: certbot
     env_file:
@@ -26,6 +27,7 @@ services:
       - certbot_acme_challenge:/var/www/certbot
 
   cron:
+    container_name: cron
     build: ./cron
     image: cron
     volumes:
@@ -36,7 +38,6 @@ services:
 volumes:
   letsencrypt_certs:
   certbot_acme_challenge:
-  nginx_conf:
   static_sites:
     external: true
 
