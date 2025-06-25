@@ -13,6 +13,7 @@ COPY vhost_static_nextjs.tpl /customization/
 COPY vhost_redirect.tpl /customization/
 COPY vhost_location.tpl /customization/
 COPY vhost_location_static.tpl /customization/
+COPY vhost_location_sse.tpl /customization/
 COPY nginx.sh /customization/
 
 RUN chmod +x /customization/nginx.sh

@@ -65,6 +65,7 @@ do
   fi
 
   vHostTemplate=""
+  sseLocationTemplate=""
   if [ "${domainTarget:0:1}" = "/" ]; then
     # Check for static site type
     staticSiteTypeVar="STATICSITETYPE_$i"
@@ -81,6 +82,20 @@ do
     domainTarget="${domainTarget:1}"                                    # remove '>' character
   else
     vHostTemplate=$(cat /customization/vhost_service.tpl) # else - serve service
+    # --- SSE support ---
+    sseVar="DOMAINSSE_$i"
+    sseEndpoints=$(eval "echo \${$sseVar}")
+    if [ -n "$sseEndpoints" ]; then
+      for ssePath in $sseEndpoints; do
+        sseLocationBlock=$(cat /customization/vhost_location_sse.tpl)
+        # Use a delimiter unlikely to appear in the path or target
+        sseLocationBlock=$(echo "$sseLocationBlock" | sed "s|\${ssePath}|$ssePath|g" | sed "s|\${target}|$domainTarget|g")
+        sseLocationTemplate="${sseLocationTemplate}
+${sseLocationBlock}
+"
+      done
+    fi
+    vHostTemplate=$(echo "${vHostTemplate//\${sseLocationTemplatePlaceholder\}/$sseLocationTemplate}")
   fi
   
   IFS=' '
