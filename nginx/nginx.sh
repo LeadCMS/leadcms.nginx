@@ -66,6 +66,7 @@ do
 
   vHostTemplate=""
   sseLocationTemplate=""
+  wssLocationTemplate=""
   if [ "${domainTarget:0:1}" = "/" ]; then
     # Check for static site type
     staticSiteTypeVar="STATICSITETYPE_$i"
@@ -88,14 +89,26 @@ do
     if [ -n "$sseEndpoints" ]; then
       for ssePath in $sseEndpoints; do
         sseLocationBlock=$(cat /customization/vhost_location_sse.tpl)
-        # Use a delimiter unlikely to appear in the path or target
         sseLocationBlock=$(echo "$sseLocationBlock" | sed "s|\${ssePath}|$ssePath|g" | sed "s|\${target}|$domainTarget|g")
         sseLocationTemplate="${sseLocationTemplate}
 ${sseLocationBlock}
 "
       done
     fi
+    # --- WSS support ---
+    wssVar="DOMAINWSS_$i"
+    wssEndpoints=$(eval "echo \${$wssVar}")
+    if [ -n "$wssEndpoints" ]; then
+      for wssPath in $wssEndpoints; do
+        wssLocationBlock=$(cat /customization/vhost_location_wss.tpl)
+        wssLocationBlock=$(echo "$wssLocationBlock" | sed "s|\${wssPath}|$wssPath|g" | sed "s|\${target}|$domainTarget|g" | sed "s|\${maxUploadSize}|$maxUploadSize|g")
+        wssLocationTemplate="${wssLocationTemplate}
+${wssLocationBlock}
+"
+      done
+    fi
     vHostTemplate=$(echo "${vHostTemplate//\${sseLocationTemplatePlaceholder\}/$sseLocationTemplate}")
+    vHostTemplate=$(echo "${vHostTemplate//\${wssLocationTemplatePlaceholder\}/$wssLocationTemplate}")
   fi
   
   IFS=' '

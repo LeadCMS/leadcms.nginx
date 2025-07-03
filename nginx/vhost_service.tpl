@@ -19,4 +19,6 @@ location / {
 
 ${sseLocationTemplatePlaceholder}
 
+${wssLocationTemplatePlaceholder}
+
 ${locationTemplatePlaceholder}
