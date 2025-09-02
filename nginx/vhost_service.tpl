@@ -12,7 +12,6 @@ location / {
         proxy_connect_timeout 5s;
         proxy_read_timeout 60s;
         proxy_send_timeout 60s;
-        proxy_next_upstream error timeout invalid_header http_502 http_504;
         resolver 127.0.0.11 8.8.8.8 1.1.1.1 valid=10s;
         resolver_timeout 5s;
     }
