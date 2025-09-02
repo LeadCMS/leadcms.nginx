@@ -10,8 +10,8 @@ location / {
 
         # Upstream recovery and DNS resolver for Docker and external
         proxy_connect_timeout 5s;
-        proxy_read_timeout 60s;
-        proxy_send_timeout 60s;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
         resolver 127.0.0.11 8.8.8.8 1.1.1.1 valid=10s;
         resolver_timeout 5s;
     }
