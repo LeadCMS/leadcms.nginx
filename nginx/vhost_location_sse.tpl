@@ -2,6 +2,10 @@
         # Use variable to enable dynamic resolution
         set $upstream ${target};
         
+        # DNS resolver for dynamic resolution
+        resolver 127.0.0.11 valid=300s ipv6=off;
+        resolver_timeout 10s;
+        
         proxy_pass         $upstream;
         proxy_set_header   Host $host;
         proxy_set_header   X-Real-IP $remote_addr;

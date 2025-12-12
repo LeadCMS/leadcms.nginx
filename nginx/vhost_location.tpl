@@ -2,6 +2,10 @@
         # Use variable to enable dynamic resolution and prevent startup failures
         set $upstream ${locationTarget};
         
+        # DNS resolver for dynamic resolution
+        resolver 127.0.0.11 valid=300s ipv6=off;
+        resolver_timeout 10s;
+        
         # Error handling for missing upstream
         error_page 502 503 504 = @fallback_${location};
         
