@@ -1,5 +1,11 @@
 location / {
-        proxy_pass         ${target};
+        # Use variable to enable dynamic resolution and prevent startup failures
+        set $upstream ${target};
+        
+        # Error handling for missing upstream
+        error_page 502 503 504 = @fallback;
+        
+        proxy_pass         $upstream;
         proxy_redirect     off;
         proxy_set_header   Host $host;
         proxy_set_header   X-Real-IP $remote_addr;
@@ -12,8 +18,15 @@ location / {
         proxy_connect_timeout 5s;
         proxy_read_timeout 600s;
         proxy_send_timeout 600s;
-        resolver 127.0.0.11 8.8.8.8 1.1.1.1 valid=10s;
+        proxy_next_upstream error timeout invalid_header http_502 http_503 http_504;
+        resolver 127.0.0.11 8.8.8.8 1.1.1.1 valid=30s ipv6=off;
         resolver_timeout 5s;
+    }
+
+    # Fallback location for when upstream is not available
+    location @fallback {
+        return 503 '<!DOCTYPE html><html><head><title>Service Unavailable</title></head><body><h1>Service Temporarily Unavailable</h1><p>The requested service is currently not available. Please try again later.</p></body></html>';
+        add_header Content-Type text/html;
     }
 
 ${sseLocationTemplatePlaceholder}
