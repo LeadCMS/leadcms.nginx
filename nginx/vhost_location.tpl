@@ -14,13 +14,11 @@
         proxy_set_header   X-Forwarded-Proto $scheme;
         client_max_body_size ${maxUploadSize};
 
-        # Upstream recovery and DNS resolver for Docker and external
+        # Upstream recovery settings
         proxy_connect_timeout 5s;
         proxy_read_timeout 600s;
         proxy_send_timeout 600s;
         proxy_next_upstream error timeout invalid_header http_502 http_503 http_504;
-        resolver 127.0.0.11 8.8.8.8 1.1.1.1 valid=30s ipv6=off;
-        resolver_timeout 5s;
     }
 
     # Fallback location for ${location} when upstream is not available

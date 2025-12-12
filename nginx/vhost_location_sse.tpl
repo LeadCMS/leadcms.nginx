@@ -15,8 +15,4 @@
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
         chunked_transfer_encoding off;
-        
-        # Resolver configuration
-        resolver 127.0.0.11 8.8.8.8 1.1.1.1 valid=30s ipv6=off;
-        resolver_timeout 5s;
     }
