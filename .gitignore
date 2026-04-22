@@ -2,3 +2,5 @@
 .vs/
 config.env
 docker-compose.yml
+test/runtime/
+test-results

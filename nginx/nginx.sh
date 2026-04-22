@@ -2,6 +2,68 @@
 
 set -e
 
+cpu_count() {
+  if command -v getconf >/dev/null 2>&1; then
+    getconf _NPROCESSORS_ONLN
+  else
+    grep -c '^processor' /proc/cpuinfo
+  fi
+}
+
+render_main_nginx_config() {
+  local cpuCount workerProcesses workerConnections workerRlimitNofile
+  local multiAccept keepaliveTimeout keepaliveRequests
+  local accessLogBuffer accessLogFlush accessLogDirective
+  local openFileCacheEnabled openFileCacheMax openFileCacheInactive openFileCacheValid openFileCacheMinUses
+  local openFileCacheBlock
+  local templateFile
+
+  cpuCount=$(cpu_count)
+  workerProcesses=${NGINX_WORKER_PROCESSES:-$cpuCount}
+  workerConnections=${NGINX_WORKER_CONNECTIONS:-1024}
+  workerRlimitNofile=${NGINX_WORKER_RLIMIT_NOFILE:-$((workerProcesses * workerConnections * 2))}
+  multiAccept=${NGINX_MULTI_ACCEPT:-off}
+  keepaliveTimeout=${NGINX_KEEPALIVE_TIMEOUT:-65}
+  keepaliveRequests=${NGINX_KEEPALIVE_REQUESTS:-1000}
+  accessLogBuffer=${NGINX_ACCESS_LOG_BUFFER:-}
+  accessLogFlush=${NGINX_ACCESS_LOG_FLUSH:-}
+  if [ -n "$accessLogBuffer" ] || [ -n "$accessLogFlush" ]; then
+    accessLogDirective="access_log /var/log/nginx/access.log main"
+    [ -n "$accessLogBuffer" ] && accessLogDirective="$accessLogDirective buffer=$accessLogBuffer"
+    [ -n "$accessLogFlush" ] && accessLogDirective="$accessLogDirective flush=$accessLogFlush"
+    accessLogDirective="$accessLogDirective;"
+  else
+    accessLogDirective="access_log /var/log/nginx/access.log main;"
+  fi
+
+  openFileCacheEnabled=${NGINX_OPEN_FILE_CACHE_ENABLED:-0}
+  if [ "$openFileCacheEnabled" = "1" ]; then
+    openFileCacheMax=${NGINX_OPEN_FILE_CACHE_MAX:-$((workerProcesses * workerConnections))}
+    openFileCacheInactive=${NGINX_OPEN_FILE_CACHE_INACTIVE:-30s}
+    openFileCacheValid=${NGINX_OPEN_FILE_CACHE_VALID:-60s}
+    openFileCacheMinUses=${NGINX_OPEN_FILE_CACHE_MIN_USES:-2}
+    openFileCacheBlock="open_file_cache max=$openFileCacheMax inactive=$openFileCacheInactive;
+    open_file_cache_valid $openFileCacheValid;
+    open_file_cache_min_uses $openFileCacheMinUses;
+    open_file_cache_errors off;"
+  else
+    openFileCacheBlock="open_file_cache off;"
+  fi
+
+  echo "Rendering main Nginx configuration for $workerProcesses workers and $workerConnections worker connections"
+
+  templateFile=$(cat /customization/nginx.conf.tpl)
+  templateFile=$(echo "${templateFile//\$\{workerProcesses\}/$workerProcesses}")
+  templateFile=$(echo "${templateFile//\$\{workerConnections\}/$workerConnections}")
+  templateFile=$(echo "${templateFile//\$\{workerRlimitNofile\}/$workerRlimitNofile}")
+  templateFile=$(echo "${templateFile//\$\{multiAccept\}/$multiAccept}")
+  templateFile=$(echo "${templateFile//\$\{keepaliveTimeout\}/$keepaliveTimeout}")
+  templateFile=$(echo "${templateFile//\$\{keepaliveRequests\}/$keepaliveRequests}")
+  templateFile=$(echo "${templateFile//\$\{accessLogDirective\}/$accessLogDirective}")
+  templateFile=$(echo "${templateFile//\$\{openFileCacheBlock\}/$openFileCacheBlock}")
+  echo "$templateFile" > /etc/nginx/nginx.conf
+}
+
 use_dummy_certificate() {
   if grep -q "/etc/letsencrypt/live/$1" "/etc/nginx/sites/$1.conf"; then
     echo "Switching Nginx to use dummy certificate for $1"
@@ -41,6 +103,8 @@ if [ ! -f /etc/nginx/sites/ssl/ssl-dhparams.pem ]; then
   mkdir -p "/etc/nginx/sites/ssl"
   openssl dhparam -out /etc/nginx/sites/ssl/ssl-dhparams.pem 2048
 fi
+
+render_main_nginx_config
 
 i=1
 while true
@@ -180,7 +244,11 @@ ${wssLocationBlock}
 
   if [ ! -d "/etc/letsencrypt/live/$domain" ]; then
     use_dummy_certificate "$domain"
-    wait_for_lets_encrypt "$domain" &
+    if [ "${NGINX_WAIT_FOR_LETSENCRYPT:-1}" != "0" ]; then
+      wait_for_lets_encrypt "$domain" &
+    else
+      echo "Skipping Let's Encrypt wait loop for $domain"
+    fi
   else
     use_lets_encrypt_certificate "$domain"
   fi

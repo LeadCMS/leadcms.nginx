@@ -33,8 +33,8 @@ But for Docker Compose there is no such popular and robust tool for TLS certific
 The example supports separate TLS certificates for multiple domain names, e.g. `example.com`, `anotherdomain.net` etc.
 For simplicity this example deals with the following domain names:
 
-- `cms.onlinesale.tech`
-- `site.onlinesale.tech`
+- `cms.leadcms.ai`
+- `leadcms.ai`
 
 The idea is simple. There are 3 containers:
 
@@ -55,9 +55,9 @@ The sequence of actions:
 1. [Docker](https://docs.docker.com/install/) and [Docker Compose](https://docs.docker.com/compose/install/) are installed
 2. You have a domain name
 3. You have a server with a publicly routable IP address
-4. You have cloned this repository (or created and cloned a [fork](https://github.com/peterliapin/onlinesales-nginx/fork)):
+4. You have cloned this repository (or created and cloned a [fork](https://github.com/peterliapin/leadcms-nginx/fork)):
    ```bash
-   git clone https://github.com/peterliapin/onlinesales-nginx.git
+   git clone https://github.com/LeadCMS/leadcms.nginx.git
    ```
 
 ### <a id="288c0835566de0a785d19451eac904a0"></a>Step 0 - Create DNS records
@@ -66,18 +66,18 @@ For all domain names create DNS A records to point to a server where Docker cont
 
 **DNS records**
 
-| Type  | Hostname                      | Value                                    |
-| ----- | ----------------------------- | ---------------------------------------- |
-| A     | `cms.onlinesale.tech`         | directs to IP address `X.X.X.X`          |
-| A     | `site.onlinesale.tech`        | directs to IP address `X.X.X.X`          |
+| Type | Hostname         | Value                           |
+| ---- | ---------------- | ------------------------------- |
+| A    | `cms.leadcms.ai` | directs to IP address `X.X.X.X` |
+| A    | `leadcms.ai`     | directs to IP address `X.X.X.X` |
 
 ### <a id="f24b6b41d1afb4cf65b765cf05a44ac1"></a>Step 1 - Edit domain names and emails in the configuration
 
 Copy the contents of config.env.sample to config.env and specify your domain names, contact emails and targets for these domains with space as delimiter in the [`config.env`](config.env):
 
 ```bash
-DOMAINS="cms.onlinesale.tech site.onlinesale.tech"
-TARGETS="http://cms_onlinesale_tech:80 /var/www/html/site.onlinesale.tech"
+DOMAINS="cms.leadcms.ai leadcms.ai"
+TARGETS="http://cms_leadcms_ai:80 /var/www/html/leadcms.ai"
 CERTBOT_EMAILS="support@onlinesale.tech support@onlinesale.tech"
 ```
 
@@ -86,8 +86,8 @@ For two and more domains separated by space use double quotes (`"`) around the `
 For a single domain double quotes can be omitted:
 
 ```bash
-DOMAINS=cms.onlinesale.tech
-TARGETS=http://cms_onlinesale_tech:80
+DOMAINS=cms.leadcms.ai
+TARGETS=http://cms_leadcms_ai:80
 CERTBOT_EMAILS=support@onlinesale.tech
 ```
 
@@ -95,10 +95,10 @@ CERTBOT_EMAILS=support@onlinesale.tech
 
 For each domain you need to configure a target value to redirect incoming traffic to a service which runs on a local port inside a host PC, remote host or as a docker compose service inside the same docker network:
 
-- `http://cms_onlinesale_tech:80` - means all traffic will be redirected to the cms_onlinesale_tech docker compose service (port 80) which is deployed in the same docker compose network 
+- `http://cms_leadcms_ai:80` - means all traffic will be redirected to the cms_leadcms_ai docker compose service (port 80) which is deployed in the same docker compose network
 - `http://localhost:80` - means all traffic will be redirected to a local service running on port 80 on the a host PC
 - `http://localhost:80` - means all traffic will be redirected to a local service running on port 80 on the a host PC
-- `/var/www/html/site.onlinesale.tech` - means that nginx will serve static content from /var/www/html/site.onlinesale.tech folder which should be mounted to the nginx service using an external volume
+- `/var/www/html/leadcms.ai` - means that nginx will serve static content from /var/www/html/leadcms.ai folder which should be mounted to the nginx service using an external volume
 
 #### <a id="cdbe8e85146b30abdbb3425163a3b7a2"></a>Serving static content
 
@@ -168,8 +168,8 @@ Reloading Nginx configuration
 
 For each domain open in browser `https://${domain}` and verify that staging Let's Encrypt certificates are working:
 
-- https://cms.onlinesale.tech
-- https://site.onlinesale.tech
+- https://cms.leadcms.ai
+- https://leadcms.ai
 
 Certificates issued by `(STAGING) Let's Encrypt` are considered not secure by browsers.
 
@@ -216,3 +216,24 @@ Do a hot reload of the Nginx configuration:
 ```bash
 docker compose exec --no-TTY nginx nginx -s reload
 ```
+
+## CI integration testing
+
+The repository includes a separate integration test stack that exercises the rendered Nginx configuration against static fixtures and a mock backend.
+
+Run it locally with:
+
+```bash
+bash test/run-integration-tests.sh
+```
+
+The test suite builds Nginx, starts a mock backend, renders all configured vhosts from [`config.env.test`](config.env.test), and verifies:
+
+- plain static hosting and custom 404 handling
+- static location aliases
+- Gatsby and NextJS cache-control behavior
+- redirect hosts
+- proxied service hosts
+- generated SSE and WSS routes
+
+GitHub Actions runs the same suite with [nginx-integration.yml](.github/workflows/nginx-integration.yml).

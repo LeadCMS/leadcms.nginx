@@ -1,0 +1,28 @@
+version: "3.7"
+
+services:
+  nginx:
+    build: ./nginx
+    image: nginx-integration
+    env_file:
+      - ./config.env.test
+    volumes:
+      - ./test/fixtures/static-sites:/var/www/html:ro
+      - ./test/runtime/letsencrypt:/etc/letsencrypt
+      - ./test/runtime/certbot:/var/www/certbot
+    ports:
+      - "127.0.0.1::80"
+      - "127.0.0.1::443"
+    depends_on:
+      - mock_backend
+
+  mock_backend:
+    image: python:3.12-alpine
+    working_dir: /app
+    command: python server.py
+    volumes:
+      - ./test/mock-backend:/app:ro
+
+networks:
+  default:
+    name: leadcms-nginx-test

@@ -1,0 +1,36 @@
+name: Onlinesales Nginx Integration
+
+permissions:
+    contents: read
+    checks: write
+
+on:
+    push:
+    pull_request:
+
+jobs:
+    integration-test:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Run integration test suite
+              run: bash test/run-integration-tests.sh
+
+            - name: Publish integration test report
+              if: always()
+              uses: mikepenz/action-junit-report@v5
+              with:
+                  report_paths: test-results/*.junit.xml
+                  check_name: Nginx Integration Test Report
+                  detailed_summary: true
+                  include_passed: true
+                  require_tests: true
+
+            - name: Upload integration test report artifact
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: nginx-integration-test-report
+                  path: test-results/*.junit.xml
