@@ -1,4 +1,4 @@
-name: Onlinesales Nginx Integration
+name: LeadCMS Nginx Integration
 
 permissions:
     contents: read

@@ -78,7 +78,7 @@ Copy the contents of config.env.sample to config.env and specify your domain nam
 ```bash
 DOMAINS="cms.leadcms.ai leadcms.ai"
 TARGETS="http://cms_leadcms_ai:80 /var/www/html/leadcms.ai"
-CERTBOT_EMAILS="support@onlinesale.tech support@onlinesale.tech"
+CERTBOT_EMAILS="support@leadcms.ai support@leadcms.ai"
 ```
 
 For two and more domains separated by space use double quotes (`"`) around the `DOMAINS` and `CERTBOT_EMAILS` variables.
@@ -88,7 +88,7 @@ For a single domain double quotes can be omitted:
 ```bash
 DOMAINS=cms.leadcms.ai
 TARGETS=http://cms_leadcms_ai:80
-CERTBOT_EMAILS=support@onlinesale.tech
+CERTBOT_EMAILS=support@leadcms.ai
 ```
 
 ### <a id="3414177b596079dbf39b1b7fa10234c6"></a>Step 2 - Configure targets

@@ -4,7 +4,7 @@ cd /workdir
 
 # Ensure we operate on the SAME Compose project as the running stack.
 # When executed on the host, the project name defaults to the basename of the directory
-# (e.g. "onlinesales.nginx" -> sanitized to onlinesalesnginx). Inside this cron container
+# (e.g. "leadcms.nginx" -> sanitized to leadcmsnginx). Inside this cron container
 # the directory name is "workdir" so without -p we'd get a DIFFERENT project (new empty volumes),
 # leading to "No renewals were attempted." and inability to exec into nginx.
 # Override via COMPOSE_PROJECT_NAME if exported, else fall back to PROJECT_NAME env or a hardcoded default.
