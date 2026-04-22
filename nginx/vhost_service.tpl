@@ -1,6 +1,4 @@
-# Resolver for dynamic DNS resolution
-    resolver 127.0.0.11 valid=300s ipv6=off;
-    resolver_timeout 10s;
+${proxyResolverTemplatePlaceholder}
 
     location / {
         # Use variable to enable dynamic resolution and prevent startup failures

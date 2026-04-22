@@ -65,6 +65,7 @@ do
   fi
 
   vHostTemplate=""
+  proxyResolverTemplate=""
   sseLocationTemplate=""
   wssLocationTemplate=""
   if [ "${domainTarget:0:1}" = "/" ]; then
@@ -83,6 +84,8 @@ do
     domainTarget="${domainTarget:1}"                                    # remove '>' character
   else
     vHostTemplate=$(cat /customization/vhost_service.tpl) # else - serve service
+    proxyResolverTemplate='    resolver 127.0.0.11 valid=300s ipv6=off;
+    resolver_timeout 10s;'
     # --- SSE support ---
     sseVar="DOMAINSSE_$i"
     sseEndpoints=$(eval "echo \${$sseVar}")
@@ -143,6 +146,8 @@ ${wssLocationBlock}
       vHostLocation=$(cat /customization/vhost_location_static.tpl)  # begins with '/' -> path -> serve static files
     else
       vHostLocation=$(cat /customization/vhost_location.tpl) # else - serve service
+      proxyResolverTemplate='    resolver 127.0.0.11 valid=300s ipv6=off;
+    resolver_timeout 10s;'
     fi
     vHostLocation=$(echo "${vHostLocation//\$\{location\}/"$domainLocation"}")
     vHostLocation=$(echo "${vHostLocation//\$\{locationTarget\}/"$domainLocationTarget"}")
@@ -152,17 +157,16 @@ ${wssLocationBlock}
 
     i_location=$((i_location+1))
   done
+  vHostTemplate=$(echo "${vHostTemplate//\$\{proxyResolverTemplatePlaceholder\}/$proxyResolverTemplate}")
   vHostTemplate=$(echo "${vHostTemplate//\$\{locationTemplatePlaceholder\}/"$vHostLocationTemplate"}")
 
 
-  if [ ! -f "/etc/nginx/sites/$domain.conf" ]; then
-    echo "Creating Nginx configuration file /etc/nginx/sites/$domain.conf"
+  echo "Rendering Nginx configuration file /etc/nginx/sites/$domain.conf"
 
-    templateFile=$(cat /customization/site.conf.tpl)
-    templateFile=$(echo "${templateFile//\$\{domain\}/"$domain"}")
-    templateFile=$(echo "${templateFile//\$\{vhostinclude\}/"$vHostTemplate"}")
-    echo "$templateFile" > "/etc/nginx/sites/$domain.conf"
-  fi
+  templateFile=$(cat /customization/site.conf.tpl)
+  templateFile=$(echo "${templateFile//\$\{domain\}/"$domain"}")
+  templateFile=$(echo "${templateFile//\$\{vhostinclude\}/"$vHostTemplate"}")
+  echo "$templateFile" > "/etc/nginx/sites/$domain.conf"
 
   if [ ! -f "/etc/nginx/sites/ssl/dummy/$domain/fullchain.pem" ]; then
     echo "Generating dummy ceritificate for $domain"
