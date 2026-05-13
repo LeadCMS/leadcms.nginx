@@ -1,2 +1,3 @@
 # Temporary redirects
 "/temp-gone/" "/index.html";
+"/external-302/" "https://www.example.com/promo/";

@@ -38,6 +38,8 @@ TEST_CASES=(
   "redirect target::test_redirect_rule"
   "plain static 301 redirect map::test_plain_static_redirect_301"
   "plain static 302 redirect map::test_plain_static_redirect_302"
+  "plain static 301 redirect to external URL::test_plain_static_redirect_301_external"
+  "plain static 302 redirect to external URL::test_plain_static_redirect_302_external"
   "service root proxy::test_service_root_proxy"
   "service api proxy::test_service_api_proxy"
   "service sse proxy::test_service_sse_proxy"
@@ -194,6 +196,16 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local haystack=$1
+  local needle=$2
+  local message=$3
+  if [[ "$haystack" == *"$needle"* ]]; then
+    echo "Assertion failed: $message"
+    return 1
+  fi
+}
+
 assert_equals() {
   local expected=$1
   local actual=$2
@@ -325,9 +337,9 @@ test_rendered_sites() {
   assert_contains "$rendered_sites" 'location /socket.io {' 'WSS location should be rendered'
   assert_contains "$rendered_sites" 'return 302 https://plain.local.test$request_uri;' 'redirect target should be rendered'
   assert_contains "$rendered_sites" 'if ($redirect_301_plain_local_test)' 'plain static 301 redirect if-block should be rendered'
-  assert_contains "$rendered_sites" 'return 301 $scheme://$http_host$redirect_301_plain_local_test' 'plain static 301 redirect should use scheme and host'
+  assert_contains "$rendered_sites" 'return 301 $redirect_301_plain_local_test_url' 'plain static 301 redirect should use url variable'
   assert_contains "$rendered_sites" 'if ($redirect_302_plain_local_test)' 'plain static 302 redirect if-block should be rendered'
-  assert_contains "$rendered_sites" 'return 302 $scheme://$http_host$redirect_302_plain_local_test' 'plain static 302 redirect should use scheme and host'
+  assert_contains "$rendered_sites" 'return 302 $redirect_302_plain_local_test_url' 'plain static 302 redirect should use url variable'
 }
 
 test_plain_static_homepage() {
@@ -394,6 +406,24 @@ test_plain_static_redirect_302() {
   local location
   location=$(grep -i '^Location:' "$TMP_DIR/plain_redirect_302.headers" | tr -d '\r')
   assert_contains "$location" '/index.html' '302 redirect Location should point to /index.html'
+}
+
+test_plain_static_redirect_301_external() {
+  request plain.local.test /external-301/ "$TMP_DIR/plain_redirect_301_ext"
+  assert_status 301 "$TMP_DIR/plain_redirect_301_ext.headers"
+  local location
+  location=$(grep -i '^Location:' "$TMP_DIR/plain_redirect_301_ext.headers" | tr -d '\r')
+  assert_contains "$location" 'https://www.example.com/external-page/' '301 redirect to external URL Location should be the absolute URL'
+  assert_not_contains "$location" 'plain.local.test' '301 redirect to external URL should not prepend the local host'
+}
+
+test_plain_static_redirect_302_external() {
+  request plain.local.test /external-302/ "$TMP_DIR/plain_redirect_302_ext"
+  assert_status 302 "$TMP_DIR/plain_redirect_302_ext.headers"
+  local location
+  location=$(grep -i '^Location:' "$TMP_DIR/plain_redirect_302_ext.headers" | tr -d '\r')
+  assert_contains "$location" 'https://www.example.com/promo/' '302 redirect to external URL Location should be the absolute URL'
+  assert_not_contains "$location" 'plain.local.test' '302 redirect to external URL should not prepend the local host'
 }
 
 test_service_root_proxy() {

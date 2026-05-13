@@ -28,6 +28,14 @@ build_redirect_map_conf() {
     printf 'map $request_uri $redirect_302_%s {\n' "$varSuffix"
     printf '    default "";\n'
     printf '    include %s/30[2].map;\n' "$mapDir"
+    printf '}\n\n'
+    printf 'map $redirect_301_%s $redirect_301_%s_url {\n' "$varSuffix" "$varSuffix"
+    printf '    ~^https?:// $redirect_301_%s;\n' "$varSuffix"
+    printf '    default      $scheme://$http_host$redirect_301_%s;\n' "$varSuffix"
+    printf '}\n\n'
+    printf 'map $redirect_302_%s $redirect_302_%s_url {\n' "$varSuffix" "$varSuffix"
+    printf '    ~^https?:// $redirect_302_%s;\n' "$varSuffix"
+    printf '    default      $scheme://$http_host$redirect_302_%s;\n' "$varSuffix"
     printf '}\n'
   } > "$outputFile"
   return 0
@@ -180,8 +188,8 @@ do
     redirectMapVarSuffix=$(echo "$domain" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g')
     mapOutput="/etc/nginx/sites/maps/${domain}.conf"
     build_redirect_map_conf "$domain" "$domainTarget" "$redirectMapVarSuffix" "$mapOutput"
-    redirectsBlock="    if (\$redirect_301_${redirectMapVarSuffix}) { return 301 \$scheme://\$http_host\$redirect_301_${redirectMapVarSuffix}; }
-    if (\$redirect_302_${redirectMapVarSuffix}) { return 302 \$scheme://\$http_host\$redirect_302_${redirectMapVarSuffix}; }"
+    redirectsBlock="    if (\$redirect_301_${redirectMapVarSuffix}) { return 301 \$redirect_301_${redirectMapVarSuffix}_url; }
+    if (\$redirect_302_${redirectMapVarSuffix}) { return 302 \$redirect_302_${redirectMapVarSuffix}_url; }"
   elif [ "${domainTarget:0:1}" = ">" ]; then
     vHostTemplate=$(cat /customization/vhost_redirect.tpl)  # begins with '>' -> temporary redirect (HTTP 302)
     domainTarget="${domainTarget:1}"                                    # remove '>' character
