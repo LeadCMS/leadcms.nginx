@@ -19,9 +19,9 @@ COPY vhost_location.tpl /customization/
 COPY vhost_location_static.tpl /customization/
 COPY vhost_location_sse.tpl /customization/
 COPY vhost_location_wss.tpl /customization/
-COPY nginx.sh /customization/
+COPY nginx.sh sync_redirect_maps.sh /customization/
 
-RUN chmod +x /customization/nginx.sh
+RUN chmod +x /customization/nginx.sh /customization/sync_redirect_maps.sh
 
 EXPOSE 80
 EXPOSE 443

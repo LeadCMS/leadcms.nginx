@@ -1,0 +1,4 @@
+# Permanent redirects
+"/old-page/" "/index.html";
+"/another-old/" "/index.html";
+"/redirect-from-very-long-path-name-that-clearly-exceeds-the-default-nginx-map-hash-bucket-size/" "/index.html";

@@ -10,6 +10,29 @@ cpu_count() {
   fi
 }
 
+# Builds an nginx map conf file that includes the plain redirect files directly.
+# The include uses glob patterns so nginx silently skips missing files.
+# When redirects/ or .map files appear later, nginx -s reload is sufficient.
+# Always returns 0 — a wrapper conf is written for every static site so that
+# the if-blocks in the server config are always present and ready.
+build_redirect_map_conf() {
+  local domain=$1 domainTarget=$2 varSuffix=$3 outputFile=$4
+  local mapDir="${domainTarget}/redirects"
+
+  echo "Generating redirect map config for $domain"
+  {
+    printf 'map $request_uri $redirect_301_%s {\n' "$varSuffix"
+    printf '    default "";\n'
+    printf '    include %s/30[1].map;\n' "$mapDir"
+    printf '}\n\n'
+    printf 'map $request_uri $redirect_302_%s {\n' "$varSuffix"
+    printf '    default "";\n'
+    printf '    include %s/30[2].map;\n' "$mapDir"
+    printf '}\n'
+  } > "$outputFile"
+  return 0
+}
+
 render_main_nginx_config() {
   local cpuCount workerProcesses workerConnections workerRlimitNofile
   local multiAccept keepaliveTimeout keepaliveRequests
@@ -104,6 +127,13 @@ if [ ! -f /etc/nginx/sites/ssl/ssl-dhparams.pem ]; then
   openssl dhparam -out /etc/nginx/sites/ssl/ssl-dhparams.pem 2048
 fi
 
+# When sourced by sync_redirect_maps.sh we only want the functions above.
+[ "${NGINX_SH_SOURCED:-0}" = "1" ] && return 0
+
+# Ensure the maps directory exists and has a placeholder so the include glob never fails
+mkdir -p /etc/nginx/sites/maps
+echo "# Redirect map includes placeholder" > /etc/nginx/sites/maps/placeholder.conf
+
 render_main_nginx_config
 
 i=1
@@ -132,6 +162,7 @@ do
   proxyResolverTemplate=""
   sseLocationTemplate=""
   wssLocationTemplate=""
+  redirectsBlock=""
   if [ "${domainTarget:0:1}" = "/" ]; then
     # Check for static site type
     staticSiteTypeVar="STATICSITETYPE_$i"
@@ -143,6 +174,14 @@ do
     else
       vHostTemplate=$(cat /customization/vhost_static.tpl)
     fi
+    # Always generate redirect map conf and if-blocks for static sites.
+    # Glob includes are silent no-ops when files don't exist yet;
+    # nginx -s reload is all that's needed when .map files appear later.
+    redirectMapVarSuffix=$(echo "$domain" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g')
+    mapOutput="/etc/nginx/sites/maps/${domain}.conf"
+    build_redirect_map_conf "$domain" "$domainTarget" "$redirectMapVarSuffix" "$mapOutput"
+    redirectsBlock="    if (\$redirect_301_${redirectMapVarSuffix}) { return 301 \$scheme://\$http_host\$redirect_301_${redirectMapVarSuffix}; }
+    if (\$redirect_302_${redirectMapVarSuffix}) { return 302 \$scheme://\$http_host\$redirect_302_${redirectMapVarSuffix}; }"
   elif [ "${domainTarget:0:1}" = ">" ]; then
     vHostTemplate=$(cat /customization/vhost_redirect.tpl)  # begins with '>' -> temporary redirect (HTTP 302)
     domainTarget="${domainTarget:1}"                                    # remove '>' character
@@ -222,6 +261,7 @@ ${wssLocationBlock}
     i_location=$((i_location+1))
   done
   vHostTemplate=$(echo "${vHostTemplate//\$\{proxyResolverTemplatePlaceholder\}/$proxyResolverTemplate}")
+  vHostTemplate=$(echo "${vHostTemplate//\$\{redirectsTemplatePlaceholder\}/"$redirectsBlock"}")
   vHostTemplate=$(echo "${vHostTemplate//\$\{locationTemplatePlaceholder\}/"$vHostLocationTemplate"}")
 
 

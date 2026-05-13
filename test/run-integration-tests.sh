@@ -34,6 +34,8 @@ TEST_CASES=(
   "nextjs route rendering::test_nextjs_route"
   "nextjs asset cache headers::test_nextjs_asset_cache_headers"
   "redirect target::test_redirect_rule"
+  "plain static 301 redirect map::test_plain_static_redirect_301"
+  "plain static 302 redirect map::test_plain_static_redirect_302"
   "service root proxy::test_service_root_proxy"
   "service api proxy::test_service_api_proxy"
   "service sse proxy::test_service_sse_proxy"
@@ -257,11 +259,20 @@ bootstrap_environment() {
     if curl -ksS --connect-timeout 5 --max-time 20 --resolve "plain.local.test:$HTTPS_PORT:127.0.0.1" "https://plain.local.test:$HTTPS_PORT/" -o /dev/null >/dev/null 2>&1; then
       break
     fi
+    # Fail fast if the nginx container has already exited (e.g. config error)
+    if ! "${COMPOSE_CMD[@]}" ps nginx | grep -q " Up \| running"; then
+      echo "Nginx container exited during startup"
+      echo "Nginx logs:"
+      "${COMPOSE_CMD[@]}" logs nginx
+      return 1
+    fi
     sleep 1
   done
 
   if ! curl -ksS --connect-timeout 5 --max-time 20 --resolve "plain.local.test:$HTTPS_PORT:127.0.0.1" "https://plain.local.test:$HTTPS_PORT/" -o /dev/null >/dev/null; then
     echo "Nginx did not become ready on HTTPS"
+    echo "Nginx logs:"
+    "${COMPOSE_CMD[@]}" logs nginx
     return 1
   fi
 
@@ -301,6 +312,10 @@ test_rendered_sites() {
   assert_contains "$rendered_sites" 'location /events {' 'SSE location should be rendered'
   assert_contains "$rendered_sites" 'location /socket.io {' 'WSS location should be rendered'
   assert_contains "$rendered_sites" 'return 302 https://plain.local.test$request_uri;' 'redirect target should be rendered'
+  assert_contains "$rendered_sites" 'if ($redirect_301_plain_local_test)' 'plain static 301 redirect if-block should be rendered'
+  assert_contains "$rendered_sites" 'return 301 $scheme://$http_host$redirect_301_plain_local_test' 'plain static 301 redirect should use scheme and host'
+  assert_contains "$rendered_sites" 'if ($redirect_302_plain_local_test)' 'plain static 302 redirect if-block should be rendered'
+  assert_contains "$rendered_sites" 'return 302 $scheme://$http_host$redirect_302_plain_local_test' 'plain static 302 redirect should use scheme and host'
 }
 
 test_plain_static_homepage() {
@@ -351,6 +366,22 @@ test_redirect_rule() {
   request redirect.local.test /docs "$TMP_DIR/redirect"
   assert_status 302 "$TMP_DIR/redirect.headers"
   assert_header_contains "$TMP_DIR/redirect.headers" 'Location: https://plain.local.test/docs'
+}
+
+test_plain_static_redirect_301() {
+  request plain.local.test /old-page/ "$TMP_DIR/plain_redirect_301"
+  assert_status 301 "$TMP_DIR/plain_redirect_301.headers"
+  local location
+  location=$(grep -i '^Location:' "$TMP_DIR/plain_redirect_301.headers" | tr -d '\r')
+  assert_contains "$location" '/index.html' '301 redirect Location should point to /index.html'
+}
+
+test_plain_static_redirect_302() {
+  request plain.local.test /temp-gone/ "$TMP_DIR/plain_redirect_302"
+  assert_status 302 "$TMP_DIR/plain_redirect_302.headers"
+  local location
+  location=$(grep -i '^Location:' "$TMP_DIR/plain_redirect_302.headers" | tr -d '\r')
+  assert_contains "$location" '/index.html' '302 redirect Location should point to /index.html'
 }
 
 test_service_root_proxy() {
