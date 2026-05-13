@@ -17,6 +17,7 @@ HTTPS_PORT=""
 TMP_DIR=""
 rendered_main_conf=""
 rendered_sites=""
+nginx_warnings=""
 cpu_count=""
 expected_worker_processes=""
 expected_worker_connections=""
@@ -24,6 +25,7 @@ expected_worker_rlimit_nofile=""
 
 TEST_CASES=(
   "bootstrap environment::bootstrap_environment"
+  "nginx has no warnings::test_nginx_no_warnings"
   "main nginx config tuning::test_main_nginx_config"
   "rendered site templates::test_rendered_sites"
   "plain static homepage::test_plain_static_homepage"
@@ -281,6 +283,8 @@ bootstrap_environment() {
     return 1
   fi
 
+  nginx_warnings=$("${COMPOSE_CMD[@]}" exec -T nginx nginx -t 2>&1 | grep '\[warn\]' || true)
+
   rendered_main_conf=$("${COMPOSE_CMD[@]}" exec -T nginx cat /etc/nginx/nginx.conf)
   rendered_sites=$("${COMPOSE_CMD[@]}" exec -T nginx sh -c 'for file in /etc/nginx/sites/*.conf; do echo "###$file###"; cat "$file"; echo; done')
   cpu_count=$("${COMPOSE_CMD[@]}" exec -T nginx sh -c 'if command -v getconf >/dev/null 2>&1; then getconf _NPROCESSORS_ONLN; else grep -c "^processor" /proc/cpuinfo; fi')
@@ -288,6 +292,14 @@ bootstrap_environment() {
   expected_worker_connections=1536
   expected_worker_rlimit_nofile=$((expected_worker_processes * expected_worker_connections * 2))
   TMP_DIR=$(mktemp -d)
+}
+
+test_nginx_no_warnings() {
+  if [[ -n "$nginx_warnings" ]]; then
+    echo "Assertion failed: nginx -t produced warnings"
+    echo "$nginx_warnings"
+    return 1
+  fi
 }
 
 test_main_nginx_config() {
