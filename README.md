@@ -14,6 +14,7 @@
   - [Step 6 - Switch to production Let's Encrypt server](#04529d361bbd6586ebcf267da5f0dfd7)
   - [Step 7 - verify HTTPS works with the production certificates](#70d8ba04ba9117ff3ba72a9413131351)
 - [Reloading Nginx configuration without downtime](#45a36b34f024f33bed82349e9096051a)
+- [HTTP Basic Authentication](#http-basic-auth)
 
 <!-- Table of contents is made with https://github.com/evgeniy-khist/markdown-toc -->
 
@@ -216,6 +217,89 @@ Do a hot reload of the Nginx configuration:
 ```bash
 docker compose exec --no-TTY nginx nginx -s reload
 ```
+
+## <a id="http-basic-auth"></a>HTTP Basic Authentication
+
+You can protect any domain or sub-location with HTTP Basic Auth without rebuilding the container. Credentials are stored in [htpasswd](https://httpd.apache.org/docs/current/programs/htpasswd.html) files that are bind-mounted read-only into Nginx.
+
+> **Important:** Basic Auth only makes sense over HTTPS. The setup here uses TLS by default, so credentials are always encrypted in transit.
+
+### Step 1 — Create a password file
+
+Password files live in the `htpasswd/` directory at the repository root. The directory is mounted into the container as `/etc/nginx/htpasswd/`.
+
+Create a file for the domain you want to protect (the filename is arbitrary — you reference it in `config.env`):
+
+```bash
+# Install htpasswd if needed: sudo apt install apache2-utils
+htpasswd -c ./htpasswd/cms.example.com admin
+# enter password when prompted
+```
+
+To add more users to an existing file (omit `-c` to avoid overwriting):
+
+```bash
+htpasswd ./htpasswd/cms.example.com another_user
+```
+
+To remove a user:
+
+```bash
+htpasswd -D ./htpasswd/cms.example.com username
+```
+
+Password file changes take effect after reloading Nginx — no container restart needed:
+
+```bash
+docker compose exec --no-TTY nginx nginx -s reload
+```
+
+### Step 2 — Protect a whole domain
+
+Set `DOMAIN_N_AUTH=1` for the domain you want to protect in `config.env`:
+
+```env
+DOMAIN_1="cms.example.com"
+DOMAINTARGET_1="http://cms_backend"
+CERTBOTEMAIL_1="admin@example.com"
+DOMAIN_1_AUTH=1
+DOMAIN_1_AUTH_FILE=cms.example.com   # filename inside ./htpasswd/ — defaults to domain name if omitted
+```
+
+All paths on `cms.example.com` will now require a login. The `DOMAIN_1_AUTH_FILE` value matches the filename you created in Step 1. If omitted, it defaults to the domain name itself.
+
+You can also customise the browser dialog title (optional):
+
+```env
+DOMAIN_1_AUTH_REALM="My Private Site"
+```
+
+### Step 3 — Protect only a sub-location
+
+Leave `DOMAIN_N_AUTH` unset and enable auth only on the specific location instead:
+
+```env
+DOMAIN_1="cms.example.com"
+DOMAINTARGET_1="http://cms_backend"
+CERTBOTEMAIL_1="admin@example.com"
+DOMAIN_1_LOCATION_1="admin"
+DOMAIN_1_LOCATION_1_TARGET="http://admin_backend"
+DOMAIN_1_LOCATION_1_AUTH=1
+DOMAIN_1_LOCATION_1_AUTH_FILE=cms.example.com   # optional, defaults to domain name
+```
+
+Now `/admin/` is password-protected while the rest of `cms.example.com` is publicly accessible.
+
+### Quick reference
+
+| Variable | Scope | Required | Default |
+|---|---|---|---|
+| `DOMAIN_N_AUTH` | whole domain | yes (to enable) | — |
+| `DOMAIN_N_AUTH_REALM` | whole domain | no | `Restricted Area` |
+| `DOMAIN_N_AUTH_FILE` | whole domain | no | domain name |
+| `DOMAIN_N_LOCATION_M_AUTH` | single location | yes (to enable) | — |
+| `DOMAIN_N_LOCATION_M_AUTH_REALM` | single location | no | `Restricted Area` |
+| `DOMAIN_N_LOCATION_M_AUTH_FILE` | single location | no | domain name |
 
 ## CI integration testing
 
