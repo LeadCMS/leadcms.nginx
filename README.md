@@ -14,6 +14,7 @@
   - [Step 6 - Switch to production Let's Encrypt server](#04529d361bbd6586ebcf267da5f0dfd7)
   - [Step 7 - verify HTTPS works with the production certificates](#70d8ba04ba9117ff3ba72a9413131351)
 - [Reloading Nginx configuration without downtime](#45a36b34f024f33bed82349e9096051a)
+- [Adding a new domain to a running stack](#adding-a-new-domain)
 - [HTTP Basic Authentication](#http-basic-auth)
 
 <!-- Table of contents is made with https://github.com/evgeniy-khist/markdown-toc -->
@@ -217,6 +218,35 @@ Do a hot reload of the Nginx configuration:
 ```bash
 docker compose exec --no-TTY nginx nginx -s reload
 ```
+
+## <a id="adding-a-new-domain"></a>Adding a new domain to a running stack
+
+Adding a domain requires two containers to be updated: **nginx** (to render the new vhost config) and **certbot** (to issue the TLS certificate).
+
+Certbot is a **one-shot container** — it runs once at stack startup, issues certificates for every domain that doesn't have one yet, then exits with code 0. It does not stay running. When you restart only nginx, certbot remains in its exited state and never fires for the new domain, so nginx loops on "Waiting for Let's Encrypt certificates" indefinitely.
+
+The correct procedure when adding a new domain:
+
+**1. Edit `config.env`** — add the new `DOMAIN_N`, `DOMAINTARGET_N`, `CERTBOTEMAIL_N` entries.
+
+**2. Rebuild nginx and restart certbot:**
+
+```bash
+docker compose up -d --build nginx && docker compose up certbot
+```
+
+- `docker compose up -d --build nginx` — rebuilds the nginx image with the new templates and recreates the container. Nginx generates a dummy TLS certificate for the new domain and starts waiting for the real one.
+- `docker compose up certbot` — creates a fresh certbot container (the old one was exited). The script skips all domains that already have a certificate and only issues new ones.
+
+Alternatively, `docker compose up -d --build` (without specifying a service) also works — it rebuilds all images and starts a fresh certbot container because the old one was exited.
+
+**3. Watch the logs** to confirm the certificate is issued:
+
+```bash
+docker compose logs -f certbot nginx
+```
+
+You should see `Switching Nginx to use Let's Encrypt certificate for <domain>` within a minute or two.
 
 ## <a id="http-basic-auth"></a>HTTP Basic Authentication
 

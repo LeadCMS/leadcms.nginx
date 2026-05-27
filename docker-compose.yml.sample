@@ -11,6 +11,7 @@ services:
       - static_sites:/var/www/html
       - letsencrypt_certs:/etc/letsencrypt
       - certbot_acme_challenge:/var/www/certbot
+      - ./htpasswd:/etc/nginx/htpasswd:ro
     ports:
       - "80:80"
       - "443:443"
