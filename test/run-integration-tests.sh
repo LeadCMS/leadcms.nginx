@@ -45,6 +45,12 @@ TEST_CASES=(
   "service sse proxy::test_service_sse_proxy"
   "service wss proxy::test_service_wss_proxy"
   "worker process count matches config::test_running_worker_count"
+  "basic auth domain unauthenticated::test_auth_domain_unauthenticated"
+  "basic auth domain authenticated::test_auth_domain_authenticated"
+  "basic auth domain wrong credentials::test_auth_domain_wrong_credentials"
+  "basic auth location public path accessible::test_auth_location_public"
+  "basic auth location protected unauthenticated::test_auth_location_unauthenticated"
+  "basic auth location protected authenticated::test_auth_location_authenticated"
 )
 TOTAL_TESTS=${#TEST_CASES[@]}
 
@@ -225,6 +231,14 @@ request() {
   curl -ksS --connect-timeout 5 --max-time 20 --resolve "$host:$HTTPS_PORT:127.0.0.1" "https://$host:$HTTPS_PORT$path" -D "$output_prefix.headers" -o "$output_prefix.body"
 }
 
+request_auth() {
+  local host=$1
+  local path=$2
+  local output_prefix=$3
+  local credentials=$4
+  curl -ksS --connect-timeout 5 --max-time 20 --resolve "$host:$HTTPS_PORT:127.0.0.1" "https://$host:$HTTPS_PORT$path" -u "$credentials" -D "$output_prefix.headers" -o "$output_prefix.body"
+}
+
 assert_status() {
   local expected=$1
   local file=$2
@@ -259,6 +273,11 @@ assert_body_contains() {
 
 bootstrap_environment() {
   mkdir -p "$ROOT_DIR/test/runtime/letsencrypt" "$ROOT_DIR/test/runtime/certbot" "$REPORT_DIR"
+
+  # Create test htpasswd files for basic auth tests (generated fresh each run)
+  mkdir -p "$ROOT_DIR/test/runtime/htpasswd"
+  printf "testuser:%s\n" "$(openssl passwd -apr1 testpass)" > "$ROOT_DIR/test/runtime/htpasswd/auth-domain.local.test"
+  cp "$ROOT_DIR/test/runtime/htpasswd/auth-domain.local.test" "$ROOT_DIR/test/runtime/htpasswd/auth-location.local.test"
 
   cleanup_stack
   "${COMPOSE_CMD[@]}" up -d --build
@@ -340,6 +359,10 @@ test_rendered_sites() {
   assert_contains "$rendered_sites" 'return 301 $redirect_301_plain_local_test_url' 'plain static 301 redirect should use url variable'
   assert_contains "$rendered_sites" 'if ($redirect_302_plain_local_test)' 'plain static 302 redirect if-block should be rendered'
   assert_contains "$rendered_sites" 'return 302 $redirect_302_plain_local_test_url' 'plain static 302 redirect should use url variable'
+  assert_contains "$rendered_sites" 'server_name auth-domain.local.test;' 'auth domain server should be rendered'
+  assert_contains "$rendered_sites" 'auth_basic_user_file /etc/nginx/htpasswd/auth-domain.local.test;' 'auth domain should have htpasswd file configured'
+  assert_contains "$rendered_sites" 'server_name auth-location.local.test;' 'auth location server should be rendered'
+  assert_contains "$rendered_sites" 'auth_basic_user_file /etc/nginx/htpasswd/auth-location.local.test;' 'auth location sub-location should have htpasswd file configured'
 }
 
 test_plain_static_homepage() {
@@ -455,6 +478,41 @@ test_running_worker_count() {
   local nginx_worker_processes
   nginx_worker_processes=$("${COMPOSE_CMD[@]}" exec -T nginx sh -c 'ps | grep "nginx: worker process" | grep -v grep | wc -l | tr -d " "')
   assert_equals "$expected_worker_processes" "$nginx_worker_processes" 'running nginx worker count should match the rendered worker_processes value'
+}
+
+test_auth_domain_unauthenticated() {
+  request auth-domain.local.test / "$TMP_DIR/auth_domain_unauth"
+  assert_status 401 "$TMP_DIR/auth_domain_unauth.headers"
+  assert_header_contains "$TMP_DIR/auth_domain_unauth.headers" 'WWW-Authenticate:'
+}
+
+test_auth_domain_authenticated() {
+  request_auth auth-domain.local.test / "$TMP_DIR/auth_domain_auth" "testuser:testpass"
+  assert_status 200 "$TMP_DIR/auth_domain_auth.headers"
+  assert_body_contains "$TMP_DIR/auth_domain_auth.body" 'backend-root'
+}
+
+test_auth_domain_wrong_credentials() {
+  request_auth auth-domain.local.test / "$TMP_DIR/auth_domain_wrong" "testuser:wrongpass"
+  assert_status 401 "$TMP_DIR/auth_domain_wrong.headers"
+}
+
+test_auth_location_public() {
+  request auth-location.local.test / "$TMP_DIR/auth_loc_public"
+  assert_status 200 "$TMP_DIR/auth_loc_public.headers"
+  assert_body_contains "$TMP_DIR/auth_loc_public.body" 'backend-root'
+}
+
+test_auth_location_unauthenticated() {
+  request auth-location.local.test /api "$TMP_DIR/auth_loc_unauth"
+  assert_status 401 "$TMP_DIR/auth_loc_unauth.headers"
+  assert_header_contains "$TMP_DIR/auth_loc_unauth.headers" 'WWW-Authenticate:'
+}
+
+test_auth_location_authenticated() {
+  request_auth auth-location.local.test /api "$TMP_DIR/auth_loc_auth" "testuser:testpass"
+  assert_status 200 "$TMP_DIR/auth_loc_auth.headers"
+  assert_body_contains "$TMP_DIR/auth_loc_auth.body" '"path": "/api"'
 }
 
 print_suite_header

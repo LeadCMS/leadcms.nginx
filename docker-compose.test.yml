@@ -10,6 +10,7 @@ services:
       - ./test/fixtures/static-sites:/var/www/html:ro
       - ./test/runtime/letsencrypt:/etc/letsencrypt
       - ./test/runtime/certbot:/var/www/certbot
+      - ./test/runtime/htpasswd:/etc/nginx/htpasswd:ro
     ports:
       - "127.0.0.1::80"
       - "127.0.0.1::443"

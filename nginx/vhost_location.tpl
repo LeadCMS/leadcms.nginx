@@ -1,4 +1,5 @@
     location  /${location} {
+        ${locationAuthBlock}
         # Use variable to enable dynamic resolution and prevent startup failures
         set $upstream ${locationTarget};
         

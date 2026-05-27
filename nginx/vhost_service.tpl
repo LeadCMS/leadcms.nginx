@@ -1,4 +1,5 @@
 ${proxyResolverTemplatePlaceholder}
+${authBlock}
 
     location / {
         # Use variable to enable dynamic resolution and prevent startup failures

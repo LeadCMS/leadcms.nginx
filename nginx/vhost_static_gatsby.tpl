@@ -1,5 +1,6 @@
 ${proxyResolverTemplatePlaceholder}
 ${redirectsTemplatePlaceholder}
+${authBlock}
 
 recursive_error_pages on;
 error_page 404 $custom_404;

@@ -264,13 +264,35 @@ ${wssLocationBlock}
     vHostLocation=$(echo "${vHostLocation//\$\{locationTarget\}/"$domainLocationTarget"}")
     vHostLocation=$(echo "${vHostLocation//\$\{maxUploadSize\}/"$maxUploadSize"}")
     vHostLocation=$(echo "${vHostLocation//\$\{index\}/"$domainTargetIndex"}")
+    locationAuthBlock=""
+    locationAuthEnabled=$(eval "echo \${DOMAIN_${i}_LOCATION_${i_location}_AUTH}")
+    if [ -n "$locationAuthEnabled" ] && [ "$locationAuthEnabled" != "0" ]; then
+      locationAuthRealm=$(eval "echo \${DOMAIN_${i}_LOCATION_${i_location}_AUTH_REALM}")
+      [ -z "$locationAuthRealm" ] && locationAuthRealm="Restricted Area"
+      locationAuthFile=$(eval "echo \${DOMAIN_${i}_LOCATION_${i_location}_AUTH_FILE}")
+      [ -z "$locationAuthFile" ] && locationAuthFile="$domain"
+      locationAuthBlock="        auth_basic \"${locationAuthRealm}\";
+        auth_basic_user_file /etc/nginx/htpasswd/${locationAuthFile};"
+    fi
+    vHostLocation=$(echo "${vHostLocation//\$\{locationAuthBlock\}/$locationAuthBlock}")
     vHostLocationTemplate="${vHostLocationTemplate} ${vHostLocation}"
 
     i_location=$((i_location+1))
   done
+  authBlock=""
+  domainAuthEnabled=$(eval "echo \${DOMAIN_${i}_AUTH}")
+  if [ -n "$domainAuthEnabled" ] && [ "$domainAuthEnabled" != "0" ]; then
+    domainAuthRealm=$(eval "echo \${DOMAIN_${i}_AUTH_REALM}")
+    [ -z "$domainAuthRealm" ] && domainAuthRealm="Restricted Area"
+    domainAuthFile=$(eval "echo \${DOMAIN_${i}_AUTH_FILE}")
+    [ -z "$domainAuthFile" ] && domainAuthFile="$domain"
+    authBlock="    auth_basic \"${domainAuthRealm}\";
+    auth_basic_user_file /etc/nginx/htpasswd/${domainAuthFile};"
+  fi
   vHostTemplate=$(echo "${vHostTemplate//\$\{proxyResolverTemplatePlaceholder\}/$proxyResolverTemplate}")
   vHostTemplate=$(echo "${vHostTemplate//\$\{redirectsTemplatePlaceholder\}/"$redirectsBlock"}")
   vHostTemplate=$(echo "${vHostTemplate//\$\{locationTemplatePlaceholder\}/"$vHostLocationTemplate"}")
+  vHostTemplate=$(echo "${vHostTemplate//\$\{authBlock\}/$authBlock}")
 
 
   echo "Rendering Nginx configuration file /etc/nginx/sites/$domain.conf"
