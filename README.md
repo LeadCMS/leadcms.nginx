@@ -292,14 +292,14 @@ Now `/admin/` is password-protected while the rest of `cms.example.com` is publi
 
 ### Quick reference
 
-| Variable | Scope | Required | Default |
-|---|---|---|---|
-| `DOMAIN_N_AUTH` | whole domain | yes (to enable) | — |
-| `DOMAIN_N_AUTH_REALM` | whole domain | no | `Restricted Area` |
-| `DOMAIN_N_AUTH_FILE` | whole domain | no | domain name |
-| `DOMAIN_N_LOCATION_M_AUTH` | single location | yes (to enable) | — |
-| `DOMAIN_N_LOCATION_M_AUTH_REALM` | single location | no | `Restricted Area` |
-| `DOMAIN_N_LOCATION_M_AUTH_FILE` | single location | no | domain name |
+| Variable                         | Scope           | Required        | Default           |
+| -------------------------------- | --------------- | --------------- | ----------------- |
+| `DOMAIN_N_AUTH`                  | whole domain    | yes (to enable) | —                 |
+| `DOMAIN_N_AUTH_REALM`            | whole domain    | no              | `Restricted Area` |
+| `DOMAIN_N_AUTH_FILE`             | whole domain    | no              | domain name       |
+| `DOMAIN_N_LOCATION_M_AUTH`       | single location | yes (to enable) | —                 |
+| `DOMAIN_N_LOCATION_M_AUTH_REALM` | single location | no              | `Restricted Area` |
+| `DOMAIN_N_LOCATION_M_AUTH_FILE`  | single location | no              | domain name       |
 
 ## CI integration testing
 
