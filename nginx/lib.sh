@@ -13,6 +13,28 @@ LETSENCRYPT_DIR="${LETSENCRYPT_DIR:-/etc/letsencrypt}"
 DUMMY_CERT_DIR="$SITES_DIR/ssl/dummy"
 DHPARAM_FILE="$SITES_DIR/ssl/ssl-dhparams.pem"
 
+# Fails with the remediation when the bind-mounted config.env is missing.
+#
+# Kept separate from load_config so a caller can refuse *before* doing any work
+# — reload.sh snapshots the rendered configuration before it renders — and
+# without load_config's side effect of clearing and re-sourcing the environment.
+require_config_file() {
+  [ -f "$CONFIG_FILE" ] && return 0
+
+  cat >&2 <<EOF
+Error: $CONFIG_FILE not found, so this render would fall back to the
+environment captured when the container was created and silently drop your
+config.env edits. Nothing was changed.
+
+Add the project directory to the nginx service's volumes in docker-compose.yml:
+
+      - ./:/etc/nginx/hostconfig:ro
+
+then recreate the stack once with: docker compose up -d --build
+EOF
+  return 1
+}
+
 # Loads config.env from the bind mount so a *running* container can see edits
 # made on the host. Compose only reads env_file at container creation, so
 # without this a config change would need a recreate.
@@ -25,11 +47,33 @@ DHPARAM_FILE="$SITES_DIR/ssl/ssl-dhparams.pem"
 # The baked-in copy is cleared first: a domain deleted from config.env would
 # otherwise still be present in the process environment and would never be
 # pruned from the rendered configuration.
+#
+# A missing config.env is fatal by default. Only the container entrypoint
+# passes --allow-stale, because at creation time Compose's env_file copy is by
+# definition current. Every later render exists to apply an edit to config.env,
+# and rendering from the baked-in environment would report success while
+# changing nothing at all — the one failure mode an operator cannot see.
 load_config() {
+  local allowStale=0
+  case "${1:-}" in
+    --allow-stale) allowStale=1 ;;
+    "") ;;
+    *) echo "load_config: unknown option '$1'" >&2; return 2 ;;
+  esac
+
   if [ ! -f "$CONFIG_FILE" ]; then
-    # Without the mount the container can only ever see the environment Compose
-    # baked in at creation, so edits to config.env would be silently ignored.
-    echo "Warning: $CONFIG_FILE not found; falling back to the environment captured when the container was created. Hot reload will not see config.env edits until the stack is recreated with the /etc/nginx/hostconfig mount." >&2
+    if [ "$allowStale" != "1" ]; then
+      require_config_file
+      return 1
+    fi
+
+    # Startup with the baked-in environment still works; it just cannot pick up
+    # later edits. Warned once per process tree so the entrypoint's own call and
+    # the render.sh it spawns do not print the same paragraph twice.
+    if [ -z "${NGINX_CONFIG_STALE_WARNED:-}" ]; then
+      export NGINX_CONFIG_STALE_WARNED=1
+      echo "Warning: $CONFIG_FILE not found; falling back to the environment captured when the container was created. Hot reload will not see config.env edits until docker-compose.yml mounts the project directory at /etc/nginx/hostconfig and the stack is recreated." >&2
+    fi
     return 0
   fi
 

@@ -320,7 +320,18 @@ If issuance fails — DNS not propagated, port 80 blocked — the script says so
 ./apply-config.sh --domains new.example.com
 ```
 
-> **Upgrading an existing deployment.** Hot reload needs the `/etc/nginx/hostconfig` mount and the new container scripts, so adopt it with one last full restart — `docker compose up -d --build`. Every `config.env` change after that is hot. If `apply-config.sh` reports that `config.env` cannot be found inside the container, this step was skipped.
+> **Upgrading an existing deployment.** Hot reload needs the `/etc/nginx/hostconfig` mount and the new container scripts. `docker-compose.yml` is gitignored — every deployment keeps its own copy — so pulling this repository does **not** add the mount for you. Add it to the `nginx` service by hand:
+>
+> ```yaml
+>     volumes:
+>       # The project directory, not config.env itself: a file bind mount would
+>       # break as soon as an editor replaced the file's inode. Read-only.
+>       - ./:/etc/nginx/hostconfig:ro
+> ```
+>
+> then adopt it with one last full restart — `docker compose up -d --build`. Every `config.env` change after that is hot.
+>
+> Until the mount is in place Nginx logs `config.env not found; falling back to the environment captured when the container was created` on startup, and `apply-config.sh` refuses to reload rather than re-rendering that stale environment and reporting success while your edit is dropped.
 
 ## <a id="http-basic-auth"></a>HTTP Basic Authentication
 

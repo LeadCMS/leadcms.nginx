@@ -11,27 +11,36 @@ set -e
 # shellcheck source=lib.sh
 . /customization/lib.sh
 
-load_config
-
 dryRun=0
+allowStale=""
 
 usage() {
   cat <<'USAGE'
-Usage: render.sh [--dry-run]
+Usage: render.sh [--dry-run] [--allow-stale-config]
 
-  --dry-run   Render into a staging directory and print what would change.
-              Nothing on disk is modified.
+  --dry-run              Render into a staging directory and print what would
+                         change. Nothing on disk is modified.
+  --allow-stale-config   Render from the environment Compose baked in at
+                         container creation when config.env is not mounted,
+                         instead of refusing. Only the entrypoint passes this;
+                         see load_config in lib.sh for why every other caller
+                         must not.
 USAGE
 }
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) dryRun=1 ;;
+    --allow-stale-config) allowStale="--allow-stale" ;;
     -h|--help) usage; exit 0 ;;
     *) echo "render.sh: unknown option '$1'" >&2; usage >&2; exit 2 ;;
   esac
   shift
 done
+
+# After parsing, so --allow-stale-config is honoured wherever it appears.
+# shellcheck disable=SC2086 # deliberately unquoted: empty means "no flag"
+load_config $allowStale
 
 if [ "$dryRun" = "1" ]; then
   stagingDir=$(mktemp -d)

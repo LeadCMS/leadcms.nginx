@@ -10,7 +10,10 @@ set -e
 # shellcheck source=lib.sh
 . /customization/lib.sh
 
-load_config
+# The entrypoint is the only caller that tolerates a missing config.env: at
+# container creation Compose's env_file copy is current by definition, so the
+# stack still comes up correctly — it just cannot hot-reload later edits.
+load_config --allow-stale
 
 certificate_state() {
   ls -1 "$LETSENCRYPT_DIR/live" 2>/dev/null | sort | tr '\n' ' '
@@ -41,7 +44,7 @@ watch_certificates() {
 
 ensure_dhparam
 
-/customization/render.sh
+/customization/render.sh --allow-stale-config
 
 if [ "${NGINX_WAIT_FOR_LETSENCRYPT:-1}" != "0" ]; then
   watch_certificates &

@@ -12,6 +12,12 @@ set -e
 # shellcheck source=lib.sh
 . /customization/lib.sh
 
+# Checked before anything else: a hot reload exists to apply an edit to
+# config.env, so without the file there is nothing to apply. Rendering the
+# environment baked in at container creation would reload nginx, print a clean
+# summary and exit 0 while changing nothing — the edit lost in silence.
+require_config_file
+
 backupDir=$(mktemp -d)
 trap 'rm -rf "$backupDir"' EXIT
 
