@@ -13,7 +13,7 @@
   - [Step 5 - verify HTTPS works with the staging certificates](#46d3804a4859874ba8b6ced6013b9966)
   - [Step 6 - Switch to production Let's Encrypt server](#04529d361bbd6586ebcf267da5f0dfd7)
   - [Step 7 - verify HTTPS works with the production certificates](#70d8ba04ba9117ff3ba72a9413131351)
-- [Reloading Nginx configuration without downtime](#45a36b34f024f33bed82349e9096051a)
+- [Applying configuration changes without downtime](#45a36b34f024f33bed82349e9096051a)
 - [Adding a new domain to a running stack](#adding-a-new-domain)
 - [HTTP Basic Authentication](#http-basic-auth)
 
@@ -48,7 +48,10 @@ The sequence of actions:
 
 1. Nginx generates self-signed "dummy" certificates to pass ACME challenge for obtaining Let's Encrypt certificates
 2. Certbot waits for Nginx to become ready and obtains certificates
-3. Cron triggers Certbot to try to renew certificates and Nginx to reload configuration daily
+3. Nginx swaps each domain over to its real certificate as soon as it is issued
+4. Cron triggers Certbot to try to renew certificates and Nginx to reload configuration daily
+
+Once the stack is up, `config.env` changes are applied with [`./apply-config.sh`](#45a36b34f024f33bed82349e9096051a) — no restart and no dropped connections. See [Applying configuration changes without downtime](#45a36b34f024f33bed82349e9096051a).
 
 ## <a id="1231369e1218613623e1b520c27ce190"></a>Initial setup
 
@@ -144,6 +147,7 @@ services:
 
 ```bash
 docker volume create --name=nginx_conf
+docker volume create --name=nginx_ssl
 docker volume create --name=letsencrypt_certs
 docker volume create --name=certbot_acme_challenge
 docker volume create --name=letsencrypt_logs
@@ -162,7 +166,7 @@ You can alternatively use the `docker-compose` binary.
 For each domain wait for the following log messages:
 
 ```
-Switching Nginx to use Let's Encrypt certificate
+Let's Encrypt certificates changed; re-rendering and reloading
 Reloading Nginx configuration
 ```
 
@@ -211,9 +215,70 @@ Certificates issued by `Let's Encrypt` are considered secure by browsers.
 
 Optionally check your domains with [SSL Labs SSL Server Test](https://www.ssllabs.com/ssltest/) and review the SSL Reports.
 
-## <a id="45a36b34f024f33bed82349e9096051a"></a>Reloading Nginx configuration without downtime
+## <a id="45a36b34f024f33bed82349e9096051a"></a>Applying configuration changes without downtime
 
-Do a hot reload of the Nginx configuration:
+`config.env` reaches Nginx two ways: Compose reads it as `env_file` when the container is **created**, and the project directory is bind-mounted read-only at `/etc/nginx/hostconfig` so a **running** container can re-read it at any time. That second path is what makes a restart unnecessary.
+
+After editing [`config.env`](config.env) — adding a domain, changing a target, raising the upload limit — apply it with:
+
+```bash
+./apply-config.sh
+```
+
+That does three things, in this order:
+
+1. re-renders every virtual host inside the running Nginx container and hot-reloads with `nginx -s reload`, which starts new workers and lets the old ones finish their in-flight requests — **no connection is dropped and no other domain is interrupted**;
+2. runs Certbot for the domains that have no certificate yet, skipping every domain that already has one;
+3. reloads once more so a freshly issued certificate replaces the self-signed placeholder.
+
+A new domain is serving traffic a couple of seconds in (on the placeholder certificate) and has a real certificate about a minute later. Adding one domain costs one certificate request, not one per configured domain.
+
+### Options
+
+| Command                                   | Effect                                                                         |
+| ----------------------------------------- | ------------------------------------------------------------------------------ |
+| `./apply-config.sh`                       | Render, hot reload, then issue any missing certificates                        |
+| `./apply-config.sh --dry-run`             | Print exactly which vhosts would be added, removed or changed. Applies nothing |
+| `./apply-config.sh --no-certs`            | Configuration only — skip Certbot entirely                                     |
+| `./apply-config.sh --domains a.com,b.com` | Limit certificate issuance to these domains                                    |
+
+On a busy stack it is worth running `--dry-run` first:
+
+```
+==> Pending configuration changes (project=leadcmsnginx)
+Dry run — nothing was applied. Pending changes:
+  + new.example.com.conf
+  + maps/new.example.com.conf
+  2 added, 0 removed, 0 changed
+```
+
+### Why this is safe
+
+The rendered files are snapshotted before every apply. If `nginx -t` rejects the result, the previous files are restored and the script exits non-zero — and since the reload never happened, Nginx is still serving the configuration it already had. A typo in `config.env` cannot take the stack down.
+
+Certbot pre-flights each domain before asking Let's Encrypt to validate it: it writes a token under the domain's ACME webroot and fetches it back through Nginx. A domain that is not being served yet is skipped with an explanation, rather than consuming one of Let's Encrypt's [five failed validations per hostname per hour](https://letsencrypt.org/docs/rate-limits/).
+
+### Removing a domain
+
+Delete its `DOMAIN_N` block from `config.env` and run `./apply-config.sh`. The virtual host and its redirect maps are pruned on the next reload. The issued certificate is left under `/etc/letsencrypt` in case the domain comes back.
+
+### What still needs a restart
+
+Only changes to the stack itself, never to `config.env`:
+
+- published ports, volumes or services in `docker-compose.yml`
+- the Nginx templates or any `Dockerfile` — `docker compose up -d --build`
+
+### Reloading by hand
+
+`apply-config.sh` is a wrapper around scripts inside the container, which can be called directly:
+
+```bash
+docker compose exec -T nginx /customization/render.sh --dry-run  # show pending changes
+docker compose exec -T nginx /customization/reload.sh            # re-render, validate, reload
+```
+
+A bare `nginx -s reload` still works, but it does not re-render, so it will **not** pick up `config.env` changes:
 
 ```bash
 docker compose exec --no-TTY nginx nginx -s reload
@@ -221,32 +286,41 @@ docker compose exec --no-TTY nginx nginx -s reload
 
 ## <a id="adding-a-new-domain"></a>Adding a new domain to a running stack
 
-Adding a domain requires two containers to be updated: **nginx** (to render the new vhost config) and **certbot** (to issue the TLS certificate).
+**1. Create the DNS record** for the new domain pointing at the server, and wait for it to resolve — Certbot warns when it does not.
 
-Certbot is a **one-shot container** — it runs once at stack startup, issues certificates for every domain that doesn't have one yet, then exits with code 0. It does not stay running. When you restart only nginx, certbot remains in its exited state and never fires for the new domain, so nginx loops on "Waiting for Let's Encrypt certificates" indefinitely.
+**2. Add the domain to [`config.env`](config.env):**
 
-The correct procedure when adding a new domain:
-
-**1. Edit `config.env`** — add the new `DOMAIN_N`, `DOMAINTARGET_N`, `CERTBOTEMAIL_N` entries.
-
-**2. Rebuild nginx and restart certbot:**
-
-```bash
-docker compose up -d --build nginx && docker compose up certbot
+```properties
+DOMAIN_4="new.example.com"
+DOMAINTARGET_4="http://new_example_com"
+CERTBOTEMAIL_4="support@example.com"
 ```
 
-- `docker compose up -d --build nginx` — rebuilds the nginx image with the new templates and recreates the container. Nginx generates a dummy TLS certificate for the new domain and starts waiting for the real one.
-- `docker compose up certbot` — creates a fresh certbot container (the old one was exited). The script skips all domains that already have a certificate and only issues new ones.
-
-Alternatively, `docker compose up -d --build` (without specifying a service) also works — it rebuilds all images and starts a fresh certbot container because the old one was exited.
-
-**3. Watch the logs** to confirm the certificate is issued:
+**3. Apply it:**
 
 ```bash
-docker compose logs -f certbot nginx
+./apply-config.sh --dry-run   # confirm only the new virtual host appears
+./apply-config.sh
 ```
 
-You should see `Switching Nginx to use Let's Encrypt certificate for <domain>` within a minute or two.
+The run ends with a per-domain summary:
+
+```
+==> Issuing certificates for domains that do not have one
+Certificate summary:
+  issued   new.example.com
+  skipped  cms.example.com (already has a certificate)
+==> Reloading nginx to pick up any newly issued certificate
+==> Done
+```
+
+If issuance fails — DNS not propagated, port 80 blocked — the script says so and exits non-zero. The new domain stays live on its placeholder certificate, every other domain is untouched, and you can retry just that one:
+
+```bash
+./apply-config.sh --domains new.example.com
+```
+
+> **Upgrading an existing deployment.** Hot reload needs the `/etc/nginx/hostconfig` mount and the new container scripts, so adopt it with one last full restart — `docker compose up -d --build`. Every `config.env` change after that is hot. If `apply-config.sh` reports that `config.env` cannot be found inside the container, this step was skipped.
 
 ## <a id="http-basic-auth"></a>HTTP Basic Authentication
 
@@ -349,5 +423,30 @@ The test suite builds Nginx, starts a mock backend, renders all configured vhost
 - redirect hosts
 - proxied service hosts
 - generated SSE and WSS routes
+- HTTP Basic Auth on a whole domain and on a single location
+- hot reload: adding, removing and reconfiguring a domain against a running Nginx, dry runs, certificate promotion, Certbot's pre-flight, and rollback of a configuration Nginx rejects
 
 GitHub Actions runs the same suite with [nginx-integration.yml](.github/workflows/nginx-integration.yml).
+
+### Running a single case
+
+```bash
+bash test/run-integration-tests.sh --list                       # case names
+bash test/run-integration-tests.sh --only "hot reload adds a domain"
+```
+
+`--reuse` attaches to a stack that is already running instead of rebuilding it, and `--keep` leaves it running afterwards, which turns a single case into a two-second run. The runner rebuilds on its own whenever anything under `nginx/` or `certbot/` changed since the last build, so a reused stack never serves stale container scripts. Stop the stack with `--teardown`.
+
+### Running from the VS Code test explorer
+
+[`test/test_integration.py`](test/test_integration.py) exposes every case as its own node in the test explorer, so cases can be run and re-run individually from the editor. It is a thin wrapper — the suite itself stays in bash and CI runs it directly, with no Python involved.
+
+The workspace is already configured in [.vscode/settings.json](.vscode/settings.json); all it needs is pytest in the interpreter VS Code has selected:
+
+```bash
+python3 -m pip install -r test/requirements-dev.txt
+```
+
+Then open the Testing view and hit refresh. Two tasks are also available from _Run Task_: **Integration tests: full suite** (rebuild and run everything in one docker session, as CI does) and **Integration tests: tear down stack**.
+
+> The stack is deliberately left running between test explorer runs so a re-run takes seconds. Tear it down with the task above, or `bash test/run-integration-tests.sh --teardown`.

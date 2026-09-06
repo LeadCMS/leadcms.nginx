@@ -16,8 +16,8 @@ server {
     http2 on;
     server_name ${domain};
 
-    ssl_certificate /etc/nginx/sites/ssl/dummy/${domain}/fullchain.pem;
-    ssl_certificate_key /etc/nginx/sites/ssl/dummy/${domain}/privkey.pem;
+    ssl_certificate ${sslCertDir}/fullchain.pem;
+    ssl_certificate_key ${sslCertDir}/privkey.pem;
 
     include /etc/nginx/includes/options-ssl-nginx.conf;
 

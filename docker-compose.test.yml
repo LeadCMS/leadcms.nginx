@@ -4,9 +4,13 @@ services:
   nginx:
     build: ./nginx
     image: nginx-integration
+    # env_file is deliberately the pristine copy while the bind mount below is a
+    # mutable one: that is the production shape, where Compose bakes in a stale
+    # environment at container creation and hot reload reads the live file.
     env_file:
       - ./config.env.test
     volumes:
+      - ./test/runtime:/etc/nginx/hostconfig:ro
       - ./test/fixtures/static-sites:/var/www/html:ro
       - ./test/runtime/letsencrypt:/etc/letsencrypt
       - ./test/runtime/certbot:/var/www/certbot
@@ -16,6 +20,17 @@ services:
       - "127.0.0.1::443"
     depends_on:
       - mock_backend
+
+  # Started only via `docker compose run certbot`, never by `up`.
+  certbot:
+    build: ./certbot
+    image: certbot-integration
+    profiles: ["tools"]
+    env_file:
+      - ./test/runtime/config.env
+    volumes:
+      - ./test/runtime/letsencrypt:/etc/letsencrypt
+      - ./test/runtime/certbot:/var/www/certbot
 
   mock_backend:
     image: python:3.12-alpine

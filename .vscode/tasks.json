@@ -1,0 +1,22 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Integration tests: full suite",
+      "detail": "Rebuild the images and run every case in one docker session, the way CI does.",
+      "type": "shell",
+      "command": "bash test/run-integration-tests.sh",
+      "group": { "kind": "test", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Integration tests: tear down stack",
+      "detail": "Stop the test stack that the test explorer leaves running between runs.",
+      "type": "shell",
+      "command": "bash test/run-integration-tests.sh --teardown",
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": []
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  // The integration suite is bash; test/test_integration.py exposes each case
+  // to the test explorer. Requires pytest in the selected interpreter:
+  //   python3 -m pip install -r test/requirements-dev.txt
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestArgs": ["test"],
+  "python.testing.cwd": "${workspaceFolder}",
+  "files.associations": {
+    "config.env*": "properties",
+    "*.tpl": "nginx"
+  }
+}

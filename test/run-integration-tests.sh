@@ -5,6 +5,10 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 COMPOSE_CMD=(docker compose -p leadcms-nginx-test -f "$ROOT_DIR/docker-compose.test.yml")
 REPORT_DIR="$ROOT_DIR/test-results"
+# Mutable copy of config.env.test, bind-mounted into the running nginx so the
+# hot reload cases can change configuration the way an operator does.
+RUNTIME_CONFIG="$ROOT_DIR/test/runtime/config.env"
+BUILD_STAMP="$ROOT_DIR/test/runtime/.build-stamp"
 REPORT_FILE="$REPORT_DIR/nginx-integration.junit.xml"
 REPORT_CASES_FILE=$(mktemp)
 RESULTS_FILE=$(mktemp)
@@ -51,11 +55,129 @@ TEST_CASES=(
   "basic auth location public path accessible::test_auth_location_public"
   "basic auth location protected unauthenticated::test_auth_location_unauthenticated"
   "basic auth location protected authenticated::test_auth_location_authenticated"
+  "hot reload adds a domain::test_hot_reload_add_domain"
+  "hot reload certbot preflight ordering::test_hot_reload_certbot_preflight"
+  "hot reload removes a domain::test_hot_reload_remove_domain"
+  "hot reload updates a live setting::test_hot_reload_update_setting"
+  "hot reload dry run applies nothing::test_hot_reload_dry_run"
+  "hot reload prunes a domain from the baked-in env::test_hot_reload_prunes_env_file_domain"
+  "hot reload promotes a dummy certificate::test_hot_reload_certificate_promotion"
+  "certbot skips a domain that already has a certificate::test_certbot_skips_existing_certificate"
+  "hot reload rejects an invalid config::test_hot_reload_invalid_config"
 )
-TOTAL_TESTS=${#TEST_CASES[@]}
+
+KEEP_STACK=0
+REUSE_STACK=0
+WRITE_REPORT=1
+ONLY_CASES=()
+
+usage_runner() {
+  cat <<'USAGE'
+Usage: run-integration-tests.sh [options]
+
+  --list       Print every test case name, one per line, and exit.
+  --only NAME  Run only this case (repeatable). The bootstrap case always runs
+               first, since every other case needs the stack it brings up.
+  --reuse      Reuse an already running test stack instead of recreating it.
+  --keep       Leave the stack running when the run finishes.
+  --teardown   Tear the test stack down and exit.
+  --no-report  Do not write the JUnit report.
+
+With no options the whole suite runs against a freshly built stack, which is
+what CI does. The other options exist so a single case can be run against a
+stack that is already up — see test/test_integration.py.
+USAGE
+}
+
+discard_temp_files() {
+  rm -f "$REPORT_CASES_FILE" "$RESULTS_FILE"
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --list)
+      for test_case in "${TEST_CASES[@]}"; do
+        echo "${test_case%%::*}"
+      done
+      discard_temp_files
+      exit 0
+      ;;
+    --only)
+      shift
+      [ $# -gt 0 ] || { echo "run-integration-tests.sh: --only requires a value" >&2; exit 2; }
+      ONLY_CASES[${#ONLY_CASES[@]}]="$1"
+      ;;
+    --only=*) ONLY_CASES[${#ONLY_CASES[@]}]="${1#--only=}" ;;
+    --reuse) REUSE_STACK=1 ;;
+    --keep) KEEP_STACK=1 ;;
+    --no-report) WRITE_REPORT=0 ;;
+    --teardown)
+      "${COMPOSE_CMD[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+      discard_temp_files
+      echo "Test stack torn down"
+      exit 0
+      ;;
+    -h|--help) usage_runner; discard_temp_files; exit 0 ;;
+    *) echo "run-integration-tests.sh: unknown option '$1'" >&2; usage_runner >&2; discard_temp_files; exit 2 ;;
+  esac
+  shift
+done
+
+SELECTED_CASES=()
+if [[ ${#ONLY_CASES[@]} -eq 0 ]]; then
+  SELECTED_CASES=("${TEST_CASES[@]}")
+else
+  selected_match_count=0
+  bootstrap_requested=0
+  for wanted in "${ONLY_CASES[@]}"; do
+    [[ "$wanted" == "bootstrap environment" ]] && bootstrap_requested=1
+  done
+  for test_case in "${TEST_CASES[@]}"; do
+    case_name=${test_case%%::*}
+    if [[ "$case_name" == "bootstrap environment" ]]; then
+      SELECTED_CASES[${#SELECTED_CASES[@]}]="$test_case"
+      continue
+    fi
+    for wanted in "${ONLY_CASES[@]}"; do
+      if [[ "$case_name" == "$wanted" ]]; then
+        SELECTED_CASES[${#SELECTED_CASES[@]}]="$test_case"
+        selected_match_count=$((selected_match_count + 1))
+        break
+      fi
+    done
+  done
+  if [[ $selected_match_count -eq 0 && $bootstrap_requested -eq 0 ]]; then
+    echo "run-integration-tests.sh: no test case matched --only. Use --list to see the available names." >&2
+    discard_temp_files
+    exit 2
+  fi
+fi
+TOTAL_TESTS=${#SELECTED_CASES[@]}
+
+stack_down() {
+  "${COMPOSE_CMD[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+}
+
+stack_is_running() {
+  "${COMPOSE_CMD[@]}" ps --status running --services 2>/dev/null | grep -qx nginx
+}
+
+# The container scripts are baked into the image, so reusing a stack built
+# before an edit would silently test the old code. Anything newer than the
+# stamp written at build time forces a rebuild.
+stack_is_current() {
+  local changed
+  [[ -f "$BUILD_STAMP" ]] || return 1
+  changed=$(find "$ROOT_DIR/nginx" "$ROOT_DIR/certbot" "$ROOT_DIR/docker-compose.test.yml" \
+    "$ROOT_DIR/config.env.test" -newer "$BUILD_STAMP" -print -quit 2>/dev/null)
+  [[ -z "$changed" ]]
+}
 
 cleanup_stack() {
-  "${COMPOSE_CMD[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+  if [[ "$KEEP_STACK" == "1" ]]; then
+    return 0
+  fi
+  stack_down
 }
 
 cleanup_resources() {
@@ -85,6 +207,9 @@ xml_escape() {
 }
 
 write_junit_report() {
+  if [[ "$WRITE_REPORT" != "1" ]]; then
+    return 0
+  fi
   mkdir -p "$REPORT_DIR"
   {
     echo '<?xml version="1.0" encoding="UTF-8"?>'
@@ -107,7 +232,9 @@ trap finish EXIT
 print_suite_header() {
   echo "Nginx integration test suite"
   echo "Project: leadcms-nginx-test"
-  echo "Report:  $REPORT_FILE"
+  if [[ "$WRITE_REPORT" == "1" ]]; then
+    echo "Report:  $REPORT_FILE"
+  fi
   echo
 }
 
@@ -135,7 +262,9 @@ print_suite_summary() {
   printf '  passed: %s\n' "$passed_count"
   printf '  failed: %s\n' "$FAILURE_COUNT"
   printf '  time:   %ss\n' "$((suite_end_time - SUITE_START_TIME))"
-  printf '  junit:  %s\n' "$REPORT_FILE"
+  if [[ "$WRITE_REPORT" == "1" ]]; then
+    printf '  junit:  %s\n' "$REPORT_FILE"
+  fi
 
   if [[ $FAILURE_COUNT -eq 0 ]]; then
     return 0
@@ -274,13 +403,27 @@ assert_body_contains() {
 bootstrap_environment() {
   mkdir -p "$ROOT_DIR/test/runtime/letsencrypt" "$ROOT_DIR/test/runtime/certbot" "$REPORT_DIR"
 
+  # Must exist before `up`, or Docker would create a directory at the mount point.
+  reset_runtime_config
+
   # Create test htpasswd files for basic auth tests (generated fresh each run)
   mkdir -p "$ROOT_DIR/test/runtime/htpasswd"
   printf "testuser:%s\n" "$(openssl passwd -apr1 testpass)" > "$ROOT_DIR/test/runtime/htpasswd/auth-domain.local.test"
   cp "$ROOT_DIR/test/runtime/htpasswd/auth-domain.local.test" "$ROOT_DIR/test/runtime/htpasswd/auth-location.local.test"
 
-  cleanup_stack
-  "${COMPOSE_CMD[@]}" up -d --build
+  if [[ "$REUSE_STACK" == "1" ]] && stack_is_running && stack_is_current; then
+    # Re-render from the pristine config so a single case starts from a known
+    # state no matter what ran before it.
+    echo "Reusing the running test stack"
+    "${COMPOSE_CMD[@]}" exec -T nginx /customization/reload.sh >/dev/null 2>&1 || true
+  else
+    if [[ "$REUSE_STACK" == "1" ]] && stack_is_running; then
+      echo "Sources changed since the last build; rebuilding the test stack"
+    fi
+    stack_down
+    "${COMPOSE_CMD[@]}" up -d --build
+    : > "$BUILD_STAMP"
+  fi
 
   HTTPS_PORT=$("${COMPOSE_CMD[@]}" port nginx 443 | awk -F: 'NR==1 {print $NF}')
   if [[ -z "$HTTPS_PORT" ]]; then
@@ -515,9 +658,306 @@ test_auth_location_authenticated() {
   assert_body_contains "$TMP_DIR/auth_loc_auth.body" '"path": "/api"'
 }
 
+# --- hot reload -------------------------------------------------------------
+#
+# These cases edit test/runtime/config.env — the file bind-mounted into the
+# running container — and apply it with reload.sh, exactly the way
+# apply-config.sh does in production.
+#
+# Each one starts from the pristine config and restores it, so any single case
+# can be run on its own (from the VS Code test explorer, say) in any order.
+
+HOT_RELOAD_DOMAIN="hotreload.local.test"
+
+nginx_master_pid() {
+  "${COMPOSE_CMD[@]}" exec -T nginx cat /var/run/nginx.pid | tr -d '[:space:]'
+}
+
+reload_nginx_config() {
+  "${COMPOSE_CMD[@]}" exec -T nginx /customization/reload.sh
+}
+
+running_config() {
+  "${COMPOSE_CMD[@]}" exec -T nginx nginx -T 2>/dev/null
+}
+
+append_runtime_config() {
+  printf '%s\n' "$@" >> "$RUNTIME_CONFIG"
+}
+
+reset_runtime_config() {
+  cp "$ROOT_DIR/config.env.test" "$RUNTIME_CONFIG"
+  # config.env.test ends without a newline; without this an appended setting
+  # would be glued onto the last line and silently ignored.
+  printf '\n' >> "$RUNTIME_CONFIG"
+}
+
+add_static_domain() {
+  local index=$1 domain=$2
+  append_runtime_config "" \
+    "DOMAIN_${index}=\"$domain\"" \
+    "DOMAINTARGET_${index}=\"/var/www/html/plain.local.test\"" \
+    "CERTBOTEMAIL_${index}=\"\""
+}
+
+# Stands in for certbot: promotion is driven purely by the directory appearing
+# under /etc/letsencrypt/live, which is a bind mount from the host.
+issue_fake_certificate() {
+  local domain=$1 certDir="$ROOT_DIR/test/runtime/letsencrypt/live/$1"
+  mkdir -p "$certDir"
+  openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
+    -subj "/CN=$domain" -keyout "$certDir/privkey.pem" -out "$certDir/fullchain.pem" >/dev/null 2>&1
+}
+
+discard_fake_certificate() {
+  rm -rf "$ROOT_DIR/test/runtime/letsencrypt/live/$1"
+}
+
+begin_hot_reload_case() {
+  reset_runtime_config
+  reload_nginx_config >/dev/null
+}
+
+end_hot_reload_case() {
+  reset_runtime_config
+  reload_nginx_config >/dev/null
+}
+
+test_hot_reload_add_domain() {
+  local pid_before pid_after
+
+  begin_hot_reload_case
+  pid_before=$(nginx_master_pid)
+
+  add_static_domain 8 "$HOT_RELOAD_DOMAIN"
+  if ! reload_nginx_config; then
+    echo "reload.sh failed for a valid configuration"
+    return 1
+  fi
+
+  request "$HOT_RELOAD_DOMAIN" / "$TMP_DIR/hot_add"
+  assert_status 200 "$TMP_DIR/hot_add.headers"
+  assert_body_contains "$TMP_DIR/hot_add.body" 'Plain Static'
+
+  if ! "${COMPOSE_CMD[@]}" exec -T nginx test -f "/etc/nginx/sites/maps/$HOT_RELOAD_DOMAIN.conf"; then
+    echo "the redirect map wrapper should be generated for a hot-added static site"
+    return 1
+  fi
+
+  pid_after=$(nginx_master_pid)
+  assert_equals "$pid_before" "$pid_after" 'the nginx master process should survive the reload (hot reload, not restart)'
+
+  end_hot_reload_case
+}
+
+test_hot_reload_remove_domain() {
+  local running_conf
+
+  begin_hot_reload_case
+  add_static_domain 8 "$HOT_RELOAD_DOMAIN"
+  reload_nginx_config >/dev/null
+
+  running_conf=$(running_config)
+  assert_contains "$running_conf" "server_name $HOT_RELOAD_DOMAIN;" 'the domain should be served before it is removed'
+
+  reset_runtime_config
+  if ! reload_nginx_config; then
+    echo "reload.sh failed while removing a domain"
+    return 1
+  fi
+
+  running_conf=$(running_config)
+  assert_not_contains "$running_conf" "server_name $HOT_RELOAD_DOMAIN;" 'a domain removed from config.env should no longer be served'
+
+  request plain.local.test / "$TMP_DIR/hot_remove"
+  assert_status 200 "$TMP_DIR/hot_remove.headers"
+}
+
+# The container's environment still holds the copy Compose baked in at creation
+# time, so removing a domain only works if that stale copy is cleared before
+# config.env is re-read.
+test_hot_reload_prunes_env_file_domain() {
+  local running_conf filtered
+
+  begin_hot_reload_case
+
+  filtered=$(grep -vE '^(DOMAIN_7|DOMAINTARGET_7|CERTBOTEMAIL_7)' "$RUNTIME_CONFIG")
+  printf '%s\n' "$filtered" > "$RUNTIME_CONFIG"
+
+  if ! reload_nginx_config; then
+    echo "reload.sh failed while removing a domain that is present in env_file"
+    return 1
+  fi
+
+  running_conf=$(running_config)
+  assert_not_contains "$running_conf" 'server_name auth-location.local.test;' 'a domain removed from config.env must not survive in the baked-in environment'
+
+  end_hot_reload_case
+
+  running_conf=$(running_config)
+  assert_contains "$running_conf" 'server_name auth-location.local.test;' 'restoring the domain should bring the vhost back'
+}
+
+test_hot_reload_update_setting() {
+  local running_conf
+
+  begin_hot_reload_case
+
+  sed -i.bak 's/^NGINX_UPLOADSIZE_MAX=.*/NGINX_UPLOADSIZE_MAX=33M/' "$RUNTIME_CONFIG"
+  rm -f "$RUNTIME_CONFIG.bak"
+
+  if ! reload_nginx_config; then
+    echo "reload.sh failed while changing NGINX_UPLOADSIZE_MAX"
+    return 1
+  fi
+
+  running_conf=$(running_config)
+  assert_contains "$running_conf" 'client_max_body_size 33M;' 'a changed upload limit should be live after the reload'
+
+  end_hot_reload_case
+}
+
+test_hot_reload_dry_run() {
+  local output running_before running_after
+
+  begin_hot_reload_case
+  running_before=$(running_config)
+
+  add_static_domain 8 dryrun.local.test
+
+  output=$("${COMPOSE_CMD[@]}" exec -T nginx /customization/render.sh --dry-run 2>&1)
+  assert_contains "$output" '+ dryrun.local.test.conf' 'the dry run should list the vhost it would add'
+  assert_contains "$output" '2 added, 0 removed, 0 changed' 'the dry run should summarise exactly what changes'
+
+  if "${COMPOSE_CMD[@]}" exec -T nginx test -f /etc/nginx/sites/dryrun.local.test.conf; then
+    echo "the dry run wrote a vhost to the live configuration directory"
+    return 1
+  fi
+
+  running_after=$(running_config)
+  assert_equals "$running_before" "$running_after" 'the dry run must not change the running configuration'
+
+  end_hot_reload_case
+}
+
+test_hot_reload_certificate_promotion() {
+  local domain="promoted.local.test" conf
+
+  begin_hot_reload_case
+  discard_fake_certificate "$domain"
+
+  add_static_domain 8 "$domain"
+  reload_nginx_config >/dev/null
+
+  conf=$("${COMPOSE_CMD[@]}" exec -T nginx cat "/etc/nginx/sites/$domain.conf")
+  assert_contains "$conf" "ssl_certificate /etc/nginx/sites/ssl/dummy/$domain/fullchain.pem;" 'a domain without a certificate should serve the self-signed placeholder'
+
+  issue_fake_certificate "$domain"
+
+  if ! reload_nginx_config; then
+    echo "reload.sh failed after the certificate appeared"
+    return 1
+  fi
+
+  conf=$("${COMPOSE_CMD[@]}" exec -T nginx cat "/etc/nginx/sites/$domain.conf")
+  assert_contains "$conf" "ssl_certificate /etc/letsencrypt/live/$domain/fullchain.pem;" 'the reload should promote the domain to its Let'"'"'s Encrypt certificate'
+
+  request "$domain" / "$TMP_DIR/hot_promote"
+  assert_status 200 "$TMP_DIR/hot_promote.headers"
+
+  discard_fake_certificate "$domain"
+  end_hot_reload_case
+}
+
+test_hot_reload_certbot_preflight() {
+  local output status
+
+  begin_hot_reload_case
+
+  # A domain nginx already serves: its ACME challenge path must answer.
+  add_static_domain 8 "$HOT_RELOAD_DOMAIN"
+  reload_nginx_config >/dev/null
+
+  status=0
+  output=$("${COMPOSE_CMD[@]}" run --rm -T certbot --preflight-only --domains "$HOT_RELOAD_DOMAIN" 2>&1) || status=$?
+  if [[ $status -ne 0 ]]; then
+    echo "Preflight should succeed for a domain nginx already serves (exit $status)"
+    echo "$output"
+    end_hot_reload_case
+    return 1
+  fi
+  assert_contains "$output" "Preflight OK for $HOT_RELOAD_DOMAIN" 'certbot should report the challenge path as reachable'
+
+  # A domain present in config.env but not yet rendered must be refused rather
+  # than spending one of Let's Encrypt's five failed validations per hour.
+  add_static_domain 9 unrendered.local.test
+
+  status=0
+  output=$("${COMPOSE_CMD[@]}" run --rm -T certbot --preflight-only --domains unrendered.local.test 2>&1) || status=$?
+  if [[ $status -eq 0 ]]; then
+    echo "Preflight should fail for a domain nginx does not serve yet"
+    echo "$output"
+    end_hot_reload_case
+    return 1
+  fi
+  assert_contains "$output" 'not reachable through nginx' 'certbot should explain why the domain was skipped'
+
+  end_hot_reload_case
+}
+
+test_certbot_skips_existing_certificate() {
+  local domain="preprovisioned.local.test" output status=0
+
+  begin_hot_reload_case
+
+  add_static_domain 8 "$domain"
+  reload_nginx_config >/dev/null
+  issue_fake_certificate "$domain"
+
+  output=$("${COMPOSE_CMD[@]}" run --rm -T certbot --domains "$domain" 2>&1) || status=$?
+
+  discard_fake_certificate "$domain"
+  end_hot_reload_case
+
+  if [[ $status -ne 0 ]]; then
+    echo "certbot should exit cleanly when the requested domain already has a certificate (exit $status)"
+    echo "$output"
+    return 1
+  fi
+  assert_contains "$output" 'already has a certificate' 'certbot should skip a domain that is already provisioned'
+  assert_not_contains "$output" 'Obtaining the certificate' 'certbot must not request a certificate it already holds'
+}
+
+test_hot_reload_invalid_config() {
+  local pid_before pid_after rendered_conf
+
+  begin_hot_reload_case
+  pid_before=$(nginx_master_pid)
+
+  append_runtime_config 'NGINX_KEEPALIVE_TIMEOUT="not-a-duration"'
+
+  if reload_nginx_config >/dev/null 2>&1; then
+    echo "reload.sh accepted a configuration nginx cannot parse"
+    end_hot_reload_case
+    return 1
+  fi
+
+  pid_after=$(nginx_master_pid)
+  assert_equals "$pid_before" "$pid_after" 'a rejected reload must not restart nginx'
+
+  rendered_conf=$("${COMPOSE_CMD[@]}" exec -T nginx cat /etc/nginx/nginx.conf)
+  assert_contains "$rendered_conf" 'keepalive_timeout 9;' 'the previous nginx.conf should be restored after a rejected reload'
+
+  # Traffic is unaffected: nginx never loaded the broken configuration.
+  request plain.local.test / "$TMP_DIR/hot_invalid"
+  assert_status 200 "$TMP_DIR/hot_invalid.headers"
+
+  end_hot_reload_case
+}
+
 print_suite_header
 
-for test_case in "${TEST_CASES[@]}"; do
+for test_case in "${SELECTED_CASES[@]}"; do
   test_name=${test_case%%::*}
   test_function=${test_case##*::}
 

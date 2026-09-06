@@ -8,10 +8,14 @@ services:
     env_file:
       - ./config.env
     volumes:
+      # The project directory, not config.env itself: a file bind mount would
+      # break as soon as an editor replaced the file's inode. Read-only.
+      - ./:/etc/nginx/hostconfig:ro
       - static_sites:/var/www/html
       - letsencrypt_certs:/etc/letsencrypt
       - certbot_acme_challenge:/var/www/certbot
       - ./htpasswd:/etc/nginx/htpasswd:ro
+      - nginx_ssl:/etc/nginx/sites/ssl
     ports:
       - "80:80"
       - "443:443"
@@ -38,6 +42,7 @@ services:
 
 volumes:
   letsencrypt_certs:
+  nginx_ssl:
   certbot_acme_challenge:
   static_sites:
     external: true

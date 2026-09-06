@@ -6,3 +6,7 @@ test/runtime/
 test-results
 htpasswd/*
 !htpasswd/.gitkeep
+
+# pytest wrapper for the integration suite
+__pycache__/
+.pytest_cache/
